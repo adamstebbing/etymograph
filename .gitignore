@@ -3,10 +3,13 @@ etymology.csv.gz
 *.parquet
 
 # Build artifacts. The full DB (~1GB) and SQL dump are intermediates for the
-# Cloudflare/D1 path; only data/etymology-web.sqlite (the pruned static DB) and
-# data/influence.json are committed and served.
+# Cloudflare/D1 path; only data/etymology-web.sqlite.gz (the pruned static DB)
+# and data/influence.json are committed and served.
 build/
 *.log
+
+# Uncompressed web DB — a build artifact; only the .gz is committed.
+data/etymology-web.sqlite
 
 # Python
 __pycache__/
@@ -22,3 +25,5 @@ Thumbs.db
 
 # Local Claude Code settings (machine-specific permissions)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/*.lock

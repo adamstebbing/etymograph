@@ -17,12 +17,13 @@
     </div>
 
     <form id="search-form" autocomplete="off">
-      <input id="search-input" type="search" placeholder="Search a word — try water, mother, night" aria-label="Search a word" />
+      <input id="search-input" type="search" placeholder="Search a word — try knife, water, mother" aria-label="Search a word" />
       <button id="search-btn" type="submit">Search</button>
       <button id="reset-btn" type="button" title="Back to the language-influence view">Reset</button>
     </form>
 
     <div class="controls">
+      <select id="lang-filter" aria-label="Filter by language" hidden></select>
       <div class="seg" id="color-mode" role="group" aria-label="Color mode">
         <button data-mode="relation" class="active" type="button">Relation type</button>
         <button data-mode="family" type="button">Language family</button>
@@ -44,6 +45,7 @@
   <!-- Vendored runtime libraries (no CDN, no build step). Versions in README. -->
   <script src="./lib/3d-force-graph.min.js"></script>
   <script src="./lib/sqljs/sql-wasm.js"></script>
+  <script src="./lib/fflate.min.js"></script>
   <script src="./main.js"></script>
 </body>
 </html>

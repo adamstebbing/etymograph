@@ -71,6 +71,18 @@ button:hover { background: rgba(60, 72, 92, 0.8); }
 #search-btn:hover { background: #8bbcff; }
 
 .controls { margin-bottom: 12px; }
+#lang-filter {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: rgba(8, 10, 14, 0.7);
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--sans);
+}
+#lang-filter:focus { outline: none; border-color: var(--accent); }
 .seg { display: flex; border: 1px solid var(--panel-border); border-radius: 9px; overflow: hidden; }
 .seg button { flex: 1; border: none; border-radius: 0; background: transparent; color: var(--muted); padding: 8px 6px; }
 .seg button.active { background: rgba(110, 168, 254, 0.16); color: var(--text); }

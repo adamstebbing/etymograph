@@ -69,7 +69,7 @@ async function neighborhood(db, seeds, seedDepth) {
   const linkSeen = new Set();
 
   function addNode(id, term, lang, depth) {
-    if (!nodes.has(id)) nodes.set(id, { id, term, lang, family: null, depth });
+    if (!nodes.has(id)) nodes.set(id, { id, term, lang, family: null, era_rank: null, depth });
     else if (depth < nodes.get(id).depth) nodes.get(id).depth = depth;
   }
 
@@ -94,21 +94,52 @@ async function neighborhood(db, seeds, seedDepth) {
     }
   }
 
-  // attach families
+  // attach family + era_rank
   const nodeIds = [...nodes.keys()].filter((id) => !id.includes("::"));
   if (nodeIds.length) {
     const fph = nodeIds.map(() => "?").join(",");
     const fam = await db
-      .prepare(`SELECT term_id, family FROM terms WHERE term_id IN (${fph})`)
+      .prepare(`SELECT term_id, family, era_rank FROM terms WHERE term_id IN (${fph})`)
       .bind(...nodeIds)
       .all();
     for (const row of fam.results || []) {
-      if (nodes.has(row.term_id)) nodes.get(row.term_id).family = row.family;
+      const n = nodes.get(row.term_id);
+      if (n) { n.family = row.family; n.era_rank = row.era_rank; }
     }
   }
-  for (const n of nodes.values()) if (n.family == null) n.family = "Unknown";
+  for (const n of nodes.values()) {
+    if (n.family == null) n.family = "Unknown";
+    if (n.era_rank == null) n.era_rank = 5;
+  }
 
   return { nodes: [...nodes.values()], links };
+}
+
+// reltype classes that point from a term to an older ancestor
+const ANCESTRY = new Set(["inherited", "derived", "root"]);
+const MAX_WORD_NODES = 250; // cap so big hubs (Latin, PIE) don't explode the graph
+
+// Merge graph b into a (dedup nodes by id keeping min depth, links by key).
+function mergeInto(a, b, cap) {
+  const byId = new Map(a.nodes.map((n) => [n.id, n]));
+  for (const n of b.nodes) {
+    if (byId.has(n.id)) {
+      const e = byId.get(n.id);
+      if (n.depth < e.depth) e.depth = n.depth;
+    } else if (a.nodes.length < cap) {
+      a.nodes.push(n);
+      byId.set(n.id, n);
+    }
+  }
+  const key = (l) => `${l.source}|${l.target}|${l.reltype}`;
+  const seen = new Set(a.links.map(key));
+  for (const l of b.links) {
+    if (byId.has(l.source) && byId.has(l.target) && !seen.has(key(l))) {
+      a.links.push(l);
+      seen.add(key(l));
+    }
+  }
+  return a;
 }
 
 async function handleWord(url, request, env) {
@@ -117,40 +148,57 @@ async function handleWord(url, request, env) {
   if (!q) return json({ query: q, nodes: [], links: [] }, request, env);
 
   const sql = lang
-    ? "SELECT term_id, term, lang, family FROM terms WHERE term = ? COLLATE NOCASE AND lang = ? LIMIT 200"
-    : "SELECT term_id, term, lang, family FROM terms WHERE term = ? COLLATE NOCASE LIMIT 200";
+    ? "SELECT term_id, term, lang, family, era_rank FROM terms WHERE term = ? COLLATE NOCASE AND lang = ? LIMIT 200"
+    : "SELECT term_id, term, lang, family, era_rank FROM terms WHERE term = ? COLLATE NOCASE LIMIT 200";
   const stmt = lang ? env.DB.prepare(sql).bind(q, lang) : env.DB.prepare(sql).bind(q);
   const matches = (await stmt.all()).results || [];
 
   if (matches.length === 0) return json({ query: q, nodes: [], links: [] }, request, env, { cache: 3600 });
 
-  const { nodes, links } = await neighborhood(env.DB, matches.map((m) => m.term_id), 0);
-  // make sure the matched nodes carry their family + depth 0
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  for (const m of matches) {
-    const n = byId.get(m.term_id);
-    if (n) {
-      n.depth = 0;
-      n.family = m.family || n.family;
-    } else {
-      nodes.push({ id: m.term_id, term: m.term, lang: m.lang, family: m.family || "Unknown", depth: 0 });
+  const seedIds = matches.map((m) => m.term_id);
+  const seedSet = new Set(seedIds);
+  const graph = await neighborhood(env.DB, seedIds, 0);
+
+  // Second hop along ancestry only: re-expand the ancestor nodes reached from a
+  // seed so their *other* children (sibling cognates) appear without a manual
+  // expand. Bounded by node id type and the overall node cap.
+  const ancestorIds = [];
+  const seenAnc = new Set();
+  for (const l of graph.links) {
+    if (seedSet.has(l.source) && ANCESTRY.has(l.reltype_class) &&
+        !l.target.includes("::") && !seenAnc.has(l.target)) {
+      seenAnc.add(l.target);
+      ancestorIds.push(l.target);
     }
   }
-  return json({ query: q, nodes, links }, request, env, { cache: 3600 });
+  if (ancestorIds.length) {
+    const hop2 = await neighborhood(env.DB, ancestorIds, 1);
+    mergeInto(graph, hop2, MAX_WORD_NODES);
+  }
+
+  // ensure matched nodes carry family/era and depth 0
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  for (const m of matches) {
+    const n = byId.get(m.term_id);
+    if (n) { n.depth = 0; n.family = m.family || n.family; n.era_rank = m.era_rank ?? n.era_rank; }
+    else graph.nodes.push({ id: m.term_id, term: m.term, lang: m.lang,
+                            family: m.family || "Unknown", era_rank: m.era_rank ?? 5, depth: 0 });
+  }
+  return json({ query: q, nodes: graph.nodes, links: graph.links }, request, env, { cache: 3600 });
 }
 
 async function handleExpand(url, request, env) {
   const id = (url.searchParams.get("id") || "").trim();
   if (!id) return json({ nodes: [], links: [] }, request, env);
-  const seed = await env.DB.prepare("SELECT term_id, term, lang, family FROM terms WHERE term_id = ?")
+  const seed = await env.DB.prepare("SELECT term_id, term, lang, family, era_rank FROM terms WHERE term_id = ?")
     .bind(id)
     .all();
   const { nodes, links } = await neighborhood(env.DB, [id], 0);
   const s = (seed.results || [])[0];
   if (s) {
     const n = nodes.find((x) => x.id === id);
-    if (n) n.family = s.family || n.family;
-    else nodes.push({ id, term: s.term, lang: s.lang, family: s.family || "Unknown", depth: 0 });
+    if (n) { n.family = s.family || n.family; n.era_rank = s.era_rank ?? n.era_rank; }
+    else nodes.push({ id, term: s.term, lang: s.lang, family: s.family || "Unknown", era_rank: s.era_rank ?? 5, depth: 0 });
   }
   return json({ nodes, links }, request, env, { cache: 3600 });
 }

@@ -1,8 +1,28 @@
 # Etymograph — Design Document
 
-A 3D etymology explorer. The default view is a force-directed graph of language-to-language influence (a "heatmap" of borrowing and inheritance volume across ~40 major languages). When a user searches a word, the graph rebuilds to show that word's etymological neighborhood: its roots, its ancestors, the languages it was borrowed into and out of, and every same-meaning cognate across languages. Nodes expand on click.
+A 3D etymology explorer with a **layered, time-ordered layout**. Vertical
+position encodes language era: proto- and ancient languages sit at the top,
+modern languages at the bottom, so every graph reads as a descent through time.
 
-This document is the build spec. The companion `DEPLOYMENT.md` covers running the pipeline and deploying.
+The default view is a graph of language-to-language influence in which each
+**language family is its own vertical column**, languages stacked by era within
+it; inheritance flows straight down a column, borrowings cross between columns,
+and edge thickness scales with influence volume. When a user searches a word,
+the graph rebuilds to show that word's etymological neighborhood — its roots,
+its ancestors, the languages it was borrowed into and out of, and every
+same-meaning cognate — laid out on the same vertical era axis. Nodes expand on
+click and collapse when clicked again.
+
+This document is the build spec. The companion `DEPLOYMENT.md` covers running the
+pipeline and deploying.
+
+> **Revision note (v2).** Sections 4–7 and 10 were revised after first deploy to
+> add: a curated language-**era** axis driving vertical layout; family-column
+> arrangement in the default view; weighted (thickness-scaled) influence edges;
+> a **two-hop** search neighborhood so sibling cognates under a shared ancestor
+> appear immediately; **collapse-on-re-click**; and a **language filter** on
+> search. The original single-web force layout is replaced by an era-locked
+> layout. See section 11 for the layout model in full.
 
 ---
 
@@ -55,6 +75,18 @@ The 31 `reltype` values fall into groups the frontend collapses for color coding
 
 A `reltype_class` column (one of `inherited`, `borrowed`, `derived`, `root`, `cognate`) is derived during preprocessing so the frontend never has to map 31 values itself.
 
+### Dataset realities (confirmed against the Dec 2023 file)
+
+- `lang` holds full language **names** ("Latin", "English", "Ancient Greek"), not
+  ISO codes. Node ids, the influence matrix, the family map, and the era map all
+  key on names.
+- The data contains a `has_root` reltype not listed among the 31 above; it is
+  mapped to the `derived` class.
+- Two derived attributes are attached to every term during preprocessing and
+  drive layout: **`family`** (language family, for color and for the default
+  view's columns) and **`era_rank`** (an integer era level, for vertical
+  position — see section 11).
+
 ---
 
 ## 3. Architecture
@@ -100,12 +132,13 @@ The frontend is fully static and deploys to GitHub Pages. Word lookups can't run
 2. **Derive `reltype_class`.** Map each of the 31 `reltype` values to its class per the table in section 2.
 3. **Resolve group nodes.** Rows with `group_*` reltypes are nested-structure markers. Flatten them so a term links directly to its constituent terms, using `group_tag` / `parent_tag` / `parent_position`. The output graph has no `group_*` nodes.
 4. **Build the edges table.** One row per directed relationship: `(term_id, term, lang, reltype, reltype_class, related_term_id, related_term, related_lang, position)`. Drop rows where both related fields are NULL once their root meaning is captured on the parent.
-5. **Build the influence matrix.** For the top ~40 languages by edge count, aggregate directed edge counts per `(lang, related_lang, reltype_class)`. Languages outside the top 40 are bucketed as `Other` so totals stay honest. Write to `data/influence.json`.
-6. **Assign language families.** Join `lang` against a bundled `lang_families.csv` (built from the repo's `wiktionary_codes.csv` plus a hand-maintained family map for the top languages). Store family on each node for the frontend's family color mode.
-7. **Index and emit.** Create the SQLite indexes (section 5), `VACUUM`, and report final file size so we know whether it fits the D1 free tier or needs trimming.
+5. **Assign families and eras.** Join `lang` against the bundled `data/lang_families.csv`, which carries one row per language with `family`, `era_rank`, and `era_label` columns (see section 11 for the era scheme). Long-tail languages fall back to `family = Unknown` and an era inferred from name prefixes (`Proto-…`, `Old …`, `Middle …`, `Ancient …`), defaulting to the modern level. Store `family` and `era_rank` on every term.
+6. **Build the influence matrix.** For the top ~40 languages by edge count, aggregate directed edge counts per `(lang, related_lang, reltype_class)`. Languages outside the top 40 are bucketed as `Other`. Each language entry in `influence.json` carries `family`, `era_rank`, and a `column` index (its family's horizontal slot) so the default view can place it without extra lookups. Write to `data/influence.json`.
+7. **Index and emit.** Create the SQLite indexes (section 5), `VACUUM`, and report final file size.
+8. **Build the compact web DB (separate script).** `scripts/build_web_db.py` reads the full DB and emits the pruned, in-browser SQLite the static site ships. See section 7 and `DEPLOYMENT.md` for the coverage/size tradeoff and the gzip packaging that keeps it under GitHub Pages' 100 MB/file limit.
 
 ### Size management
-The full edge set may exceed D1's free-tier size. The pipeline takes a `--max-langs` and an optional `--min-degree` flag to prune low-connectivity terms. Default build keeps everything and prints the size; if it's over budget, rerun with pruning. The decision point is documented in `DEPLOYMENT.md`.
+The full edge set is ~1 GB (measured), well over D1's free-tier size — the original 270–400 MB estimate was wrong (SQLite stores text uncompressed and the indexes add overhead). The static path therefore ships a pruned subset; the Cloudflare path needs `--min-degree` pruning or Workers Paid. The pipeline takes `--max-langs` and `--min-degree`; `build_web_db.py` takes a curated language set and a `--min-degree` floor. The decision point is documented in `DEPLOYMENT.md`.
 
 ---
 
@@ -128,16 +161,18 @@ CREATE TABLE terms (
     term_id   TEXT PRIMARY KEY,
     term      TEXT NOT NULL,
     lang      TEXT NOT NULL,
-    family    TEXT                     -- language family for color mode
+    family    TEXT,                    -- language family (column + color)
+    era_rank  INTEGER                  -- vertical era level (0 = oldest/top)
 );
 
-CREATE INDEX idx_edges_term       ON edges(term_id);
-CREATE INDEX idx_edges_related    ON edges(related_term_id);
-CREATE INDEX idx_terms_term       ON terms(term);
-CREATE INDEX idx_terms_term_lang  ON terms(term, lang);
+CREATE INDEX idx_edges_term         ON edges(term_id);
+CREATE INDEX idx_edges_related      ON edges(related_term_id);
+CREATE INDEX idx_terms_term         ON terms(term);
+CREATE INDEX idx_terms_term_lang    ON terms(term, lang);
+CREATE INDEX idx_terms_term_nocase  ON terms(term COLLATE NOCASE);
 ```
 
-Search resolves a typed word against `terms.term` (case-folded), returning all `term_id`s across languages that match. Neighborhood expansion reads `edges` in both directions for a given `term_id`.
+Search resolves a typed word against `terms.term` (case-folded), optionally constrained by `lang`, returning matching `term_id`s. Neighborhood expansion reads `edges` in both directions for a given `term_id`. `family` and `era_rank` ride along on every term node so the frontend lays it out and colors it without a second query.
 
 ---
 
@@ -146,44 +181,52 @@ Search resolves a typed word against `terms.term` (case-folded), returning all `
 Base path `/api`. All responses JSON, with CORS allowing the GitHub Pages origin. All responses cached at the edge where the input is stable.
 
 ### `GET /api/influence`
-Returns the prebuilt language-influence matrix. Loaded once on first paint.
+Returns the prebuilt language-influence matrix. Loaded once on first paint. Each language carries the attributes the default view needs to place it: `family` (its column group), `era_rank` (its vertical level), and `column` (the family's horizontal slot, assigned in the prebuild).
 
 ```json
 {
   "languages": [
-    { "id": "en", "name": "English", "family": "Indo-European" }
+    { "id": "English", "name": "English", "family": "Germanic", "era_rank": 5, "column": 0 },
+    { "id": "Middle English", "name": "Middle English", "family": "Germanic", "era_rank": 4, "column": 0 }
   ],
   "edges": [
-    { "source": "la", "target": "en", "reltype_class": "borrowed", "weight": 18342 }
+    { "source": "Middle English", "target": "English", "reltype_class": "inherited", "weight": 15829 },
+    { "source": "Latin", "target": "English", "reltype_class": "borrowed", "weight": 8123 }
   ]
 }
 ```
 
 ### `GET /api/word?q=<term>&lang=<optional>`
-Resolves the search term and returns its full immediate neighborhood: the matching term node(s), every directly related term (both directions), and the relation between them. If `lang` is omitted and the term exists in several languages, all matching term nodes are returned and linked to their shared ancestors, which satisfies the "show all versions across languages" requirement.
+Resolves the search term and returns its etymological neighborhood. To satisfy "show every same-meaning cognate" up front, the walk is **two hops along ancestry**: the matched term(s), their direct neighbors, and — crucially — the *other children of any shared ancestor* reached on the first hop. That second hop is what surfaces sibling cognates (e.g. for `knife`, German *Knifte* / Swedish *kniv* / Danish *kniv* hanging off Proto-Germanic `*knībaz`) without the user having to expand the ancestor by hand.
+
+If `lang` is given, only term nodes in that language seed the walk (the search box exposes this as a language filter; see section 7). If `lang` is omitted and the term exists in several languages, all matching nodes seed it and link to their shared ancestors.
 
 ```json
 {
-  "query": "water",
+  "query": "knife",
   "nodes": [
-    { "id": "en:water", "term": "water", "lang": "en", "family": "Indo-European", "depth": 0 },
-    { "id": "ang:wæter", "term": "wæter", "lang": "ang", "family": "Indo-European", "depth": 1 },
-    { "id": "ine-pro:*wódr̥", "term": "*wódr̥", "lang": "ine-pro", "family": "Indo-European", "depth": 2 }
+    { "id": "<id>", "term": "knife",   "lang": "English",         "family": "Germanic", "era_rank": 5, "depth": 0 },
+    { "id": "<id>", "term": "knyf",    "lang": "Middle English",  "family": "Germanic", "era_rank": 4, "depth": 1 },
+    { "id": "<id>", "term": "cnīf",    "lang": "Old English",     "family": "Germanic", "era_rank": 3, "depth": 1 },
+    { "id": "<id>", "term": "*knībaz", "lang": "Proto-Germanic",  "family": "Germanic", "era_rank": 1, "depth": 2 },
+    { "id": "<id>", "term": "Knifte",  "lang": "German",          "family": "Germanic", "era_rank": 5, "depth": 2 }
   ],
   "links": [
-    { "source": "en:water", "target": "ang:wæter", "reltype": "inherited_from", "reltype_class": "inherited" }
+    { "source": "<knife>", "target": "<cnīf>",    "reltype": "inherited_from", "reltype_class": "inherited" },
+    { "source": "<knife>", "target": "<*knībaz>", "reltype": "derived_from",   "reltype_class": "derived"   },
+    { "source": "<Knifte>","target": "<*knībaz>", "reltype": "inherited_from", "reltype_class": "inherited" }
   ]
 }
 ```
 
-Node `id` is the `term_id` from the dataset; the `lang:term` strings above are illustrative. `depth` is hops from the query and drives initial layout.
+Node `id` is the dataset `term_id`. `era_rank` drives vertical position; `depth` (hops from the query) is retained for camera framing and dimming. The two-hop fan-out is bounded: only ancestor nodes (those reached by an inherited/derived/root edge) are re-expanded on the second hop, and the total node count is capped so a single query stays cheap against D1's per-query limits.
 
 ### `GET /api/expand?id=<term_id>`
-Returns the immediate neighbors of one term, for click-to-expand. Same node/link shape as `/api/word`. The frontend merges results into the existing graph, deduping by node id.
+Returns the immediate (one-hop) neighbors of one term, for click-to-expand. Same node/link shape as `/api/word`, every node carrying `family` and `era_rank`. The frontend merges results into the existing graph, deduping by node id, and remembers which nodes a given expansion introduced so it can **collapse** them on re-click (section 7).
 
 ### Query semantics
-- Neighborhood walks are bounded (one hop per call). The frontend grows the graph by calling `/api/expand`, which keeps any single query cheap and predictable against D1's per-query row limits.
-- Term matching is case-insensitive on a normalized column. Diacritics are preserved, since they're meaningful in many of these terms.
+- `/api/word` walks two hops along ancestry (capped); `/api/expand` walks one hop. Both are index-backed.
+- Term matching is case-insensitive on a normalized column; the optional `lang` is matched exactly. Diacritics are preserved.
 
 ---
 
@@ -203,30 +246,50 @@ Vanilla JS, no build step, no bundler. Three files plus vendored libraries.
 ### Libraries
 `3d-force-graph` (which wraps Three.js and a force engine) handles the WebGL graph, camera, and layout. Vendoring the minified files into `/lib` keeps the site dependency-free at runtime and avoids a CDN dependency. Pin exact versions and record them in the README.
 
-### Default view
-On load, `main.js` calls `/api/influence` and renders the ~40 language nodes. Edge thickness and brightness scale with influence weight (log-scaled, since counts span orders of magnitude). This is the "heatmap" of cross-language influence.
+### Layout engine — era-locked positioning
+The graph stays 3D (`3d-force-graph`), but **the Y axis is pinned, not simulated.** Each node's `fy` (fixed y) is set from its `era_rank` so it cannot drift vertically: `fy = (MAX_ERA − era_rank) * LEVEL_GAP`, putting era 0 (proto/root) at the top and the modern era at the bottom. The force engine is left free on X and Z, so nodes spread organically *within* their level. In the default view, X is also pinned per node to its family `column` (`fx = column * COLUMN_GAP`), producing discrete family columns; Z stays free. In the search view, X/Z are free (only Y is locked), so a word's tree settles naturally under its era bands. See section 11 for the era model.
 
-### Search view
-A search box issues `/api/word`. The graph clears and rebuilds around the result. All same-meaning terms across languages appear as distinct nodes linked to shared ancestors. The camera frames the new graph.
+### Default view — family columns, era-stacked
+On load, `main.js` calls `/api/influence` and renders the language nodes as **one column per family**, languages stacked by era within the column (proto/old at top → modern at bottom). Edges:
+- **Inheritance** (`inherited`/`derived`/`root`) runs mostly vertically *within* a column — e.g. Middle English → Modern English.
+- **Borrowing**/**cognate** edges cross *between* columns — e.g. Latin → English, French → English.
+- **Thickness scales with influence weight**, log-scaled since counts span orders of magnitude, so the strongest line into Modern English (from Middle English) is the thickest, French/Latin medium, Greek thin. Brightness/opacity track weight too.
 
-### Expansion
-Clicking a node calls `/api/expand` and merges the returned neighbors in, so the user grows the neighborhood outward at will. A node already expanded is marked so repeat clicks don't refetch.
+A column header labels each family. This replaces the old undifferentiated "web".
+
+### Search view — the word's etymology, leveled
+A search box issues `/api/word` (with the optional language filter, below). The graph clears and rebuilds with the matched term at the bottom (its era level) and ancestors rising level by level to the root at top. Rules:
+- Vertical position is the term's `era_rank` (curated era table — section 11). Modern English `knife` at the bottom; Middle English a level up; Old English / Old Norse on the "Old" level; Proto-Germanic above; Proto-Indo-European at the top.
+- **`etymologically_related_to` terms in the same language share a level** (they are siblings, not ancestors), so two Proto-Germanic forms related to each other sit side by side on the same band.
+- The two-hop walk means **sibling cognates appear immediately** (German, Swedish, Danish forms under the shared Proto-Germanic ancestor), each placed on its own era level.
+- The camera frames the new graph top-to-bottom.
+
+#### Same-level tiebreaker (knife nuance)
+Because the era table is the single source of vertical truth, Old English and Old Norse land on the *same* level (both "Old"), whereas the motivating example sketched Old Norse just above Old English (it being the source of the English form). As a refinement, within one era level a node that is the **source** of another currently-visible node is nudged a small fraction of a level upward, so a derived-from chain still reads top-to-bottom without breaking the era banding. This is cosmetic and bounded to less than one level gap.
+
+### Language filter
+The search supports constraining to one language (the `lang` param), matching the "filter on term=knife and lang=English" workflow:
+- Typing a bare word searches all languages.
+- A small language selector (populated from the distinct languages a term matches, or accepting `word @ Language` / `word/Language` shorthand in the box) pins results to one language. Clearing it returns to all-languages.
+
+### Expansion and collapse
+Clicking an un-expanded node calls `/api/expand`, merges the one-hop neighbors in (deduped by id), and **records the set of node and link ids that expansion introduced**. Clicking the same node again **collapses** it: the recorded nodes/links are removed, *except* any node that is still anchored — i.e. also reachable from the original search seeds or from another still-expanded node — so shared ancestors and the search core never disappear. A node toggles between expanded and collapsed on each click; its marker reflects state. Re-expanding refetches only if the cache was dropped.
 
 ### Color toggle
 A control switches between two modes, recoloring in place with no network call (both attributes ship on every node/link):
 - **Relation type** — links colored by `reltype_class`: inherited, borrowed, derived, root, cognate.
 - **Language family** — nodes colored by `family`.
 
-A legend updates with the active mode.
+A legend updates with the active mode. (Family color and family column are consistent, so the default view is legible in either mode.)
 
 ### Other UI
-- Hover shows term, language, and relation.
+- Hover shows term, language, era, and relation.
 - A reset control returns to the influence view.
 - Loading and empty states (a searched term with no matches says so plainly).
 - Mobile: the graph is usable on touch; the control panel collapses.
 
 ### Design language
-Follow a dark, low-chrome aesthetic so the graph carries the screen. Use a restrained categorical palette with enough separation for the five relation classes and the language families. Keep typography to one clean sans for UI and a mono accent for term/language codes.
+Follow a dark, low-chrome aesthetic so the graph carries the screen. Use a restrained categorical palette with enough separation for the five relation classes and the language families. Keep typography to one clean sans for UI and a mono accent for term/language codes. Subtle horizontal era bands (faint gridlines or labels at the left edge) help the eye read the vertical time axis.
 
 ---
 
@@ -239,12 +302,16 @@ Follow a dark, low-chrome aesthetic so the graph carries the screen. Use a restr
 ├── styles.css
 ├── lib/
 │   ├── 3d-force-graph.min.js
-│   └── three.min.js
+│   ├── three.min.js
+│   ├── sqljs/                    # sql.js wasm for the static path
+│   └── (gzip inflater)           # e.g. fflate, for the .gz web DB
 ├── data/
-│   ├── influence.json            # generated; also served by Worker
-│   └── lang_families.csv         # source for family assignment
+│   ├── influence.json            # generated; languages carry family+era_rank+column
+│   ├── lang_families.csv         # curated: lang -> family, era_rank, era_label
+│   └── etymology-web.sqlite.gz   # generated; pruned in-browser DB (gzipped)
 ├── scripts/
-│   └── preprocess.py             # dataset -> SQLite + influence.json
+│   ├── preprocess.py             # dataset -> full SQLite + influence.json
+│   └── build_web_db.py           # full SQLite -> pruned + gzipped web DB
 ├── worker/
 │   ├── src/index.js              # Worker entry, routes, CORS
 │   ├── wrangler.toml             # D1 binding, routes
@@ -270,8 +337,64 @@ Each stage is testable before the next. The frontend points at a configurable AP
 
 ---
 
-## 10. Open decisions to confirm during build
+## 10. Resolved decisions
 
-- **D1 size — resolved.** The source file is ~134 MB compressed; the built database lands around 270–400 MB, under the 500 MB free-tier cap. Build for the free tier with the full dataset. Pruning is a fallback only if a future release grows past the cap.
-- **Top-language cutoff.** ~40 is the target for the influence view; the exact set comes from edge-count ranking in the data.
-- **Family map coverage.** The bundled family map covers the top languages well; long-tail languages may show as `Unknown` in family color mode, which is acceptable.
+- **DB size — corrected.** The full built database is **~1 GB** (measured), not the 270–400 MB first estimated, so it does *not* fit D1's 500 MB free tier. The default site uses the **static** path (a pruned in-browser SQLite); the Cloudflare path needs `--min-degree` pruning or Workers Paid.
+- **Static DB packaging.** To carry a richer (looser-pruned) subset while staying under GitHub Pages' 100 MB/file limit, the web DB is **gzipped** (`etymology-web.sqlite.gz`) and inflated in the browser before handing it to sql.js. Target the committed `.gz` under ~90 MB; if even that overflows, split into shards or fall back to Cloudflare.
+- **Top-language cutoff.** ~40 for the influence view, by edge-count ranking. The static web DB uses a curated ~46-language set (section 7 / `DEPLOYMENT.md`).
+- **Family / era map coverage.** The bundled map covers the top languages; long-tail languages fall back to `family = Unknown` and a prefix-inferred era. Acceptable.
+- **Leveling model.** A single curated **era table** drives vertical position in both views (see section 11), with a bounded same-level tiebreaker for ancestry chains (section 7).
+
+---
+
+## 11. Layout model — eras and family columns
+
+The whole visual language hangs on two per-language attributes computed in
+preprocessing and carried on every node: **`era_rank`** (vertical) and
+**`family` → `column`** (horizontal, default view).
+
+### Era ranks
+
+`era_rank` is a small integer; **lower = older = higher on screen.** A single
+curated table in `data/lang_families.csv` assigns it per language, with a
+prefix-based fallback for the long tail. The scheme:
+
+| rank | era | examples |
+|---|---|---|
+| 0 | Family root proto | Proto-Indo-European, Proto-Uralic, Proto-Turkic |
+| 1 | Branch proto | Proto-Germanic, Proto-Italic, Proto-Slavic, Proto-Celtic, Proto-Hellenic, Proto-Indo-Iranian |
+| 2 | Ancient / classical | Latin, Ancient Greek, Sanskrit, Gothic, Old Church Slavonic, Avestan, Old Persian |
+| 3 | Old / early-medieval | Old English, Old Norse, Old French, Old High German, Old Irish |
+| 4 | Middle / medieval | Middle English, Middle French, Middle High German, Middle Dutch |
+| 5 | Modern | English, German, French, Spanish, Russian, Hindi, … |
+
+Fallback when a language isn't in the table: name starting `Proto-…` → 1
+(or 0 if it is a top family proto such as `Proto-Indo-European`), `Ancient …` → 2,
+`Old …` → 3, `Middle …` → 4, otherwise 5. The curated table overrides the
+fallback wherever the prefix would mislead (e.g. `Latin` has no prefix but is era
+2; `Vulgar/Late/Medieval/New Latin` stay era 2 alongside it; `Old Church
+Slavonic` is era 2 not 3).
+
+Frontend mapping: `fy = (MAX_ERA − era_rank) * LEVEL_GAP`. Optional left-edge
+labels/bands annotate each rank.
+
+**Known simplification (accepted):** because era is by language, contemporaries
+across a single era share a level — Old English and Old Norse both at rank 3 —
+even though a specific word's chain may derive one from the other. The
+same-level source-nudge tiebreaker (section 7) recovers readability for the
+common ancestry-chain case without splitting eras per word.
+
+### Family columns
+
+In the default view each `family` occupies a horizontal slot. The prebuild sorts
+families (by total edge volume, descending) and assigns each a `column` index;
+`influence.json` carries it per language so the frontend sets
+`fx = column * COLUMN_GAP`. Within a column, languages float free on Z and are
+pinned on Y by era, so a column reads as that family's timeline. Borrowing and
+cognate edges crossing columns visualize cross-family influence; their thickness
+encodes weight.
+
+In the **search view** families are *not* forced into columns (a single word
+rarely spans enough families to warrant it); only the era Y-lock applies, and
+nodes are colored by family in family mode. This keeps a word's tree compact
+while preserving the time axis.

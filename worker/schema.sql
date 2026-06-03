@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS terms (
     term_id   TEXT PRIMARY KEY,
     term      TEXT NOT NULL,
     lang      TEXT NOT NULL,
-    family    TEXT                     -- language family for color mode
+    family    TEXT,                    -- language family (column + color)
+    era_rank  INTEGER                  -- vertical era level (0 = oldest/top)
 );
 
 CREATE INDEX IF NOT EXISTS idx_edges_term         ON edges(term_id);

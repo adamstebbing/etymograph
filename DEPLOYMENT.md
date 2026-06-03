@@ -8,10 +8,14 @@ The flow is: process the dataset into a SQLite file → load it into D1 → depl
 
 ## 0. Prerequisites
 
-- **Node.js 18+** (Wrangler needs 16.17+; use 18 LTS or newer).
-- **Python 3.10+** with `pip`.
-- **A Cloudflare account** (free plan works for development; see the size constraint in section 4).
-- **A GitHub account** with the repo pushed.
+The **default static deployment needs only Python + a GitHub account.** Node,
+Wrangler, and Cloudflare are required *only* for the optional full-dataset API
+path (sections 3–6).
+
+- **Python 3.10+** with `pip`. *(required)*
+- **A GitHub account** with the repo pushed. *(required)*
+- **Node.js 18+** — *optional*, Cloudflare path only (Wrangler needs 16.17+).
+- **A Cloudflare account** — *optional*, Cloudflare path only; see the size constraint in section 4.
 - **The dataset file** from `github.com/droher/etymology-db` (the Parquet file, or the gzipped CSV). It's linked from the repo README and hosted on OneDrive. Download it manually; it isn't in the repo.
 
 Install Wrangler:
@@ -36,29 +40,59 @@ Place the downloaded dataset somewhere outside the repo (it's large; don't commi
 
 ## 2. Run the preprocessing pipeline
 
-`scripts/preprocess.py` reads the dataset and produces two artifacts:
-- `build/etymology.sql` (or `build/etymology.sqlite`) — the database for D1.
-- `data/influence.json` — the language-influence matrix for the default view.
+The build is **two steps**: `preprocess.py` turns the raw dataset into the full
+SQLite + the influence matrix; `build_web_db.py` then derives the compact,
+gzipped in-browser database the static site ships.
+
+`scripts/preprocess.py` produces:
+- `build/etymology.sqlite` — the full database (also the source for both the D1 path and the web DB). Add `--out-sql build/etymology.sql` for the D1 import file.
+- `data/influence.json` — the influence matrix; each language carries `family`, `era_rank`, and `column` for the family-column default view.
+
+It reads `data/lang_families.csv`, which is curated and carries one row per
+language with `family`, `era_rank`, and `era_label` (see DESIGN.md section 11 for
+the era scheme). Keep that file up to date when adding languages.
 
 ```bash
-cd scripts
-pip install -r requirements.txt          # polars, pyarrow, pandas
-python preprocess.py \
-    --input /path/to/etymology.parquet \
-    --out-sql ../build/etymology.sql \
-    --out-influence ../data/influence.json \
+pip install -r scripts/requirements.txt   # only pyarrow, and only for Parquet input
+python scripts/preprocess.py \
+    --input etymology.csv.gz \
+    --out-sqlite build/etymology.sqlite \
+    --out-influence data/influence.json \
     --max-langs 40
 ```
 
-When it finishes it prints the resulting database size. The source file is ~134 MB compressed, so the built database should land around 270–400 MB after table storage and indexes — under the 500 MB free-tier cap. Confirm the printed number is under 500 MB and proceed on the free plan.
+When it finishes it prints the resulting database size. **Measured reality: the
+full DB is ~1 GB**, not the 270–400 MB originally estimated — SQLite stores text
+uncompressed and the indexes add overhead. That is over D1's 500 MB free cap, so
+the full dataset is **not** free-tier-ready without pruning (section 4). The
+default deploy uses the static path below, which does its own pruning.
 
-Pruning is only a fallback. If the printed size somehow exceeds 500 MB, rerun with:
+### 2b. Build the static web database (default path)
+
+`scripts/build_web_db.py` reads the full DB and writes a pruned SQLite limited to
+a curated language set and a minimum term degree, then **gzips it** so the
+committed file stays under GitHub Pages' 100 MB/file limit while carrying a
+richer slice (the browser inflates it before handing it to sql.js).
 
 ```bash
-python preprocess.py ... --min-degree 2     # drop terms with fewer than 2 relationships
+python scripts/build_web_db.py \
+    --full build/etymology.sqlite \
+    --out data/etymology-web.sqlite \
+    --min-degree 3 \
+    --gzip                       # emits data/etymology-web.sqlite.gz
 ```
 
-`--min-degree` trims the long tail of terms that link to nothing else, which cuts size while keeping well-connected words. The expected path needs no pruning.
+Lower `--min-degree` and a larger language set widen coverage (more low-degree
+cognates like German *Knifte* survive) at the cost of size. Watch the printed
+sizes: target the **committed `.gz` under ~90 MB**. `--min-degree 3` is the
+current target; raise it if the gz overflows, lower it (toward 2) if you have
+headroom. Commit `data/etymology-web.sqlite.gz`, not the uncompressed file.
+
+> Coverage note: even with looser pruning, sibling cognates that hang off a
+> shared ancestor surface at search time only because `/api/word` (and the
+> static query that mirrors it) walks **two hops** along ancestry — see DESIGN.md
+> section 6. Pruning controls which *direct* edges survive; the two-hop walk
+> controls how many *siblings* you see without expanding by hand.
 
 ---
 
@@ -94,11 +128,23 @@ wrangler d1 execute etymograph --remote --file=./schema.sql
 
 ---
 
+> **The Cloudflare path (sections 3–6) is optional.** The default deployment is
+> the static path (section 2b → section 8). Do these sections only if you want
+> full-dataset coverage behind the Worker API.
+
 ## 4. Load the data — and the plan decision
 
-**The plan: free tier, full dataset.** On the Cloudflare **free** plan, a single D1 database is capped at **500 MB**, a Worker may run at most **50 queries per invocation**, and the account allows **~150M row reads per month**. The source file is ~134 MB compressed. Loaded into D1 as tables plus indexes it expands (indexes add overhead, and SQLite stores text uncompressed), so expect something in the **270–400 MB** range. That stays under 500 MB, so the free tier covers the full dataset with no pruning.
+**Corrected plan: the full dataset does NOT fit the free tier.** On the Cloudflare **free** plan a single D1 database is capped at **500 MB**, a Worker runs at most **50 queries per invocation**, and the account allows **~150M row reads per month**. The full built DB is **~1 GB** (measured — see section 2), roughly double the free cap. So one of:
 
-**Confirm against the printed size.** The pipeline prints the final database size after building (section 2). If it comes in under 500 MB, load it as-is and stay on the free plan. If it somehow lands over 500 MB, prune the long tail with `--min-degree 2` and rebuild until it fits, or move to Workers Paid ($5/mo) for a 10 GB cap and a 1000-query-per-invocation limit. Build for the free tier by default; pruning is a fallback, not the expected path.
+- **Prune to fit free tier.** Rebuild a reduced full DB with `--min-degree` until it lands under 500 MB, accepting the long-tail loss:
+  ```bash
+  python scripts/preprocess.py --input etymology.csv.gz \
+      --out-sqlite build/etymology.sqlite --out-sql build/etymology.sql \
+      --out-influence data/influence.json --min-degree 2
+  ```
+- **Or go Workers Paid** ($5/mo) for a 10 GB cap and 1000 queries/invocation, and load the full ~1 GB DB as-is.
+
+**Confirm against the printed size** before importing. The static path (section 2b) is the no-cost default and needs none of this.
 
 **Import the SQL file** (the `d1 execute` file import limit is 5 GB, which covers both paths):
 
@@ -162,21 +208,34 @@ The Worker must allow the Pages origin. Set the allowed origin in the Worker (an
 
 ## 7. Configure the frontend
 
-The frontend reads the API base URL from one constant. In `main.js`:
+The frontend picks its data source from one constant in `main.js`:
 
 ```js
+const DATA_SOURCE = "static";   // "static" (default) | "api"
 const API_BASE = "https://etymograph-api.<subdomain>.workers.dev/api";
 ```
 
-For local testing point it at `http://localhost:8787/api`. Keep this the only place the URL appears so the two environments differ by one line. Serve the frontend locally to test:
+- **`static`** (default): loads `data/influence.json` and inflates
+  `data/etymology-web.sqlite.gz` in the browser (vendored gzip inflater + sql.js).
+  No backend. This is what GitHub Pages serves.
+- **`api`**: points at the Worker from sections 3–6 for full-dataset coverage.
+  For local Worker testing set `API_BASE = "http://localhost:8787/api"`.
+
+Both sources return the same node/link shape (every node carrying `family` and
+`era_rank`), so the layout, two-hop search, expand/collapse, and color toggle
+behave identically either way.
+
+Serve the frontend locally to test:
 
 ```bash
-cd ..            # repo root
-python -m http.server 8000
-# open http://localhost:8000
+python -m http.server 8000      # from repo root; open http://localhost:8000
 ```
 
-Confirm: the influence graph loads on first paint, a word search rebuilds the graph, clicking a node expands it, and the relation/family color toggle recolors without a refetch.
+Confirm: the influence graph loads as **family columns stacked by era**; a word
+search rebuilds the graph **leveled by era** with sibling cognates present;
+clicking a node expands it and **clicking again collapses it**; the language
+filter narrows a search; and the relation/family color toggle recolors without a
+refetch.
 
 ---
 
@@ -198,12 +257,13 @@ After the first deploy, update the Worker's `ALLOWED_ORIGIN` to the real Pages U
 
 On the live `github.io` URL:
 
-1. Influence graph renders on load.
-2. Search a common word (e.g. "water", "night", "mother") — graph rebuilds with roots, ancestors, and cross-language cognates.
-3. A word in several languages shows all versions linked to shared ancestors.
-4. Click a node — neighbors load and merge in.
-5. Toggle relation-type vs language-family coloring — recolors instantly, no network call.
-6. Search nonsense — a clean "no matches" state.
+1. Influence graph renders on load as **family columns**, each stacked by era (proto/old at top → modern at bottom), with thicker lines for stronger influence (Middle→Modern English thickest).
+2. Search a common word (e.g. "knife", "water", "mother") — graph rebuilds **leveled by era**, the modern term at the bottom and roots rising to the top.
+3. Sibling cognates under a shared ancestor (e.g. German/Swedish/Danish forms for "knife") appear **without** a manual expand (two-hop walk).
+4. The **language filter** (e.g. term=knife, lang=English) narrows results to one language.
+5. Click a node — neighbors merge in; **click it again — they collapse** (shared ancestors stay).
+6. Toggle relation-type vs language-family coloring — recolors instantly, no network call.
+7. Search nonsense — a clean "no matches" state.
 
 ---
 
@@ -212,14 +272,15 @@ On the live `github.io` URL:
 When a new `etymology-db` release lands:
 
 1. Download the new file.
-2. Rerun `preprocess.py` (section 2).
-3. Decide whether to recreate the table or replace rows. Simplest is to drop and reload:
+2. Update `data/lang_families.csv` if the release adds languages you want columned/leveled.
+3. Rerun `preprocess.py` then `build_web_db.py --gzip` (section 2 / 2b).
+4. **Static path:** commit the regenerated `data/influence.json` and `data/etymology-web.sqlite.gz` and push; Pages redeploys the frontend.
+5. **Cloudflare path (if used):** drop and reload D1:
    ```bash
    wrangler d1 execute etymograph --remote --command "DROP TABLE edges; DROP TABLE terms;"
    wrangler d1 execute etymograph --remote --file=./schema.sql
    wrangler d1 execute etymograph --remote --file=../build/etymology.sql
    ```
-4. Commit the regenerated `data/influence.json` and push; Pages redeploys the frontend.
 
 ---
 
@@ -233,7 +294,7 @@ When a new `etymology-db` release lands:
 | Queries per Worker invocation | 50 | Paid → 1000 |
 | GitHub Pages | Free for public repos | — |
 
-The dataset fits the free tier (built database ~270–400 MB against the 500 MB cap), so a personal public project runs at no cost. Keep queries indexed so row reads stay low. Workers Paid ($5/mo) is only relevant if a future dataset release grows past 500 MB.
+**The default static path runs at no cost** on GitHub Pages alone — no Cloudflare account needed. The full DB is ~1 GB and does **not** fit D1's free 500 MB cap, so the *optional* Cloudflare path requires either `--min-degree` pruning to fit free, or Workers Paid ($5/mo, 10 GB cap). Keep Worker queries indexed so row reads stay low.
 
 ---
 

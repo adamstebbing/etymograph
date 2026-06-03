@@ -1,197 +1,198 @@
-lang,family
-English,Germanic
-German,Germanic
-Dutch,Germanic
-Middle Dutch,Germanic
-Old Dutch,Germanic
-Low German,Germanic
-German Low German,Germanic
-Middle Low German,Germanic
-Old Saxon,Germanic
-Middle High German,Germanic
-Old High German,Germanic
-Old English,Germanic
-Middle English,Germanic
-Swedish,Germanic
-Old Swedish,Germanic
-Norwegian,Germanic
-Norwegian Bokmål,Germanic
-Norwegian Nynorsk,Germanic
-Danish,Germanic
-Old Norse,Germanic
-Old Danish,Germanic
-Icelandic,Germanic
-Faroese,Germanic
-Luxembourgish,Germanic
-West Frisian,Germanic
-Old Frisian,Germanic
-Gothic,Germanic
-Frankish,Germanic
-Proto-Germanic,Germanic
-Proto-West Germanic,Germanic
-Proto-Norse,Germanic
-Latin,Romance
-Late Latin,Romance
-Vulgar Latin,Romance
-Medieval Latin,Romance
-New Latin,Romance
-Ecclesiastical Latin,Romance
-Italian,Romance
-Old Italian,Romance
-French,Romance
-Old French,Romance
-Middle French,Romance
-Spanish,Romance
-Old Spanish,Romance
-Portuguese,Romance
-Galician,Romance
-Galician-Portuguese,Romance
-Romanian,Romance
-Catalan,Romance
-Old Catalan,Romance
-Occitan,Romance
-Old Occitan,Romance
-Sicilian,Romance
-Sardinian,Romance
-Friulian,Romance
-Romansch,Romance
-Proto-Italic,Romance
-Proto-Indo-European,Indo-European
-Ancient Greek,Hellenic
-Greek,Hellenic
-Mycenaean Greek,Hellenic
-Proto-Hellenic,Hellenic
-Polish,Slavic
-Russian,Slavic
-Ukrainian,Slavic
-Belarusian,Slavic
-Czech,Slavic
-Slovak,Slavic
-Serbo-Croatian,Slavic
-Bulgarian,Slavic
-Macedonian,Slavic
-Slovene,Slavic
-Old Church Slavonic,Slavic
-Proto-Slavic,Slavic
-Proto-Balto-Slavic,Balto-Slavic
-Lithuanian,Baltic
-Latvian,Baltic
-Old Prussian,Baltic
-Proto-Baltic,Baltic
-Sanskrit,Indo-Iranian
-Hindi,Indo-Iranian
-Urdu,Indo-Iranian
-Persian,Indo-Iranian
-Old Persian,Indo-Iranian
-Middle Persian,Indo-Iranian
-Pashto,Indo-Iranian
-Bengali,Indo-Iranian
-Punjabi,Indo-Iranian
-Nepali,Indo-Iranian
-Marathi,Indo-Iranian
-Gujarati,Indo-Iranian
-Pali,Indo-Iranian
-Prakrit,Indo-Iranian
-Avestan,Indo-Iranian
-Proto-Indo-Iranian,Indo-Iranian
-Proto-Iranian,Indo-Iranian
-Irish,Celtic
-Old Irish,Celtic
-Middle Irish,Celtic
-Welsh,Celtic
-Middle Welsh,Celtic
-Scottish Gaelic,Celtic
-Breton,Celtic
-Cornish,Celtic
-Manx,Celtic
-Gaulish,Celtic
-Proto-Celtic,Celtic
-Albanian,Albanian
-Old Armenian,Armenian
-Armenian,Armenian
-Proto-Armenian,Armenian
-Tocharian A,Tocharian
-Tocharian B,Tocharian
-Finnish,Uralic
-Estonian,Uralic
-Hungarian,Uralic
-Karelian,Uralic
-Votic,Uralic
-Veps,Uralic
-Northern Sami,Uralic
-Proto-Finnic,Uralic
-Proto-Uralic,Uralic
-Proto-Samic,Uralic
-Turkish,Turkic
-Azerbaijani,Turkic
-Kazakh,Turkic
-Uzbek,Turkic
-Turkmen,Turkic
-Kyrgyz,Turkic
-Tatar,Turkic
-Bashkir,Turkic
-Uyghur,Turkic
-Chuvash,Turkic
-Ottoman Turkish,Turkic
-Old Turkic,Turkic
-Proto-Turkic,Turkic
-Arabic,Afroasiatic
-Hebrew,Afroasiatic
-Aramaic,Afroasiatic
-Amharic,Afroasiatic
-Maltese,Afroasiatic
-Akkadian,Afroasiatic
-Egyptian,Afroasiatic
-Proto-Semitic,Afroasiatic
-Japanese,Japonic
-Old Japanese,Japonic
-Okinawan,Japonic
-Proto-Japonic,Japonic
-Korean,Koreanic
-Middle Korean,Koreanic
-Old Korean,Koreanic
-Proto-Koreanic,Koreanic
-Mandarin,Sino-Tibetan
-Chinese,Sino-Tibetan
-Middle Chinese,Sino-Tibetan
-Old Chinese,Sino-Tibetan
-Cantonese,Sino-Tibetan
-Tibetan,Sino-Tibetan
-Burmese,Sino-Tibetan
-Proto-Sino-Tibetan,Sino-Tibetan
-Thai,Tai-Kadai
-Lao,Tai-Kadai
-Zhuang,Tai-Kadai
-Shan,Tai-Kadai
-Proto-Tai,Tai-Kadai
-Vietnamese,Austroasiatic
-Khmer,Austroasiatic
-Mon,Austroasiatic
-Proto-Mon-Khmer,Austroasiatic
-Indonesian,Austronesian
-Malay,Austronesian
-Tagalog,Austronesian
-Cebuano,Austronesian
-Javanese,Austronesian
-Hawaiian,Austronesian
-Maori,Austronesian
-Malagasy,Austronesian
-Proto-Austronesian,Austronesian
-Proto-Malayo-Polynesian,Austronesian
-Mongolian,Mongolic
-Middle Mongol,Mongolic
-Proto-Mongolic,Mongolic
-Georgian,Kartvelian
-Old Georgian,Kartvelian
-Basque,Isolate
-Swahili,Niger-Congo
-Yoruba,Niger-Congo
-Zulu,Niger-Congo
-Proto-Bantu,Niger-Congo
-Nahuatl,Uto-Aztecan
-Quechua,Quechuan
-Esperanto,Constructed
-Ido,Constructed
-Interlingua,Constructed
-Volapük,Constructed
-Translingual,Translingual
+lang,family,era_rank,era_label
+English,Germanic,5,Modern
+German,Germanic,5,Modern
+Dutch,Germanic,5,Modern
+Middle Dutch,Germanic,4,Middle
+Old Dutch,Germanic,3,Old
+Low German,Germanic,5,Modern
+German Low German,Germanic,5,Modern
+Middle Low German,Germanic,4,Middle
+Old Saxon,Germanic,3,Old
+Middle High German,Germanic,4,Middle
+Old High German,Germanic,3,Old
+Old English,Germanic,3,Old
+Middle English,Germanic,4,Middle
+Swedish,Germanic,5,Modern
+Old Swedish,Germanic,3,Old
+Norwegian,Germanic,5,Modern
+Norwegian Bokmål,Germanic,5,Modern
+Norwegian Nynorsk,Germanic,5,Modern
+Danish,Germanic,5,Modern
+Old Norse,Germanic,3,Old
+Old Danish,Germanic,3,Old
+Icelandic,Germanic,5,Modern
+Faroese,Germanic,5,Modern
+Luxembourgish,Germanic,5,Modern
+West Frisian,Germanic,5,Modern
+Old Frisian,Germanic,3,Old
+Gothic,Germanic,2,Ancient
+Frankish,Germanic,3,Old
+Proto-Germanic,Germanic,1,Proto
+Proto-West Germanic,Germanic,1,Proto
+Proto-Norse,Germanic,1,Proto
+Latin,Romance,2,Ancient
+Late Latin,Romance,2,Ancient
+Vulgar Latin,Romance,2,Ancient
+Medieval Latin,Romance,2,Ancient
+New Latin,Romance,2,Ancient
+Ecclesiastical Latin,Romance,2,Ancient
+Italian,Romance,5,Modern
+Old Italian,Romance,3,Old
+French,Romance,5,Modern
+Old French,Romance,3,Old
+Middle French,Romance,4,Middle
+Spanish,Romance,5,Modern
+Old Spanish,Romance,3,Old
+Portuguese,Romance,5,Modern
+Galician,Romance,5,Modern
+Galician-Portuguese,Romance,3,Old
+Romanian,Romance,5,Modern
+Catalan,Romance,5,Modern
+Old Catalan,Romance,3,Old
+Occitan,Romance,5,Modern
+Old Occitan,Romance,3,Old
+Sicilian,Romance,5,Modern
+Sardinian,Romance,5,Modern
+Friulian,Romance,5,Modern
+Romansch,Romance,5,Modern
+Proto-Italic,Romance,1,Proto
+Proto-Indo-European,Indo-European,0,Proto (root)
+Ancient Greek,Hellenic,2,Ancient
+Greek,Hellenic,5,Modern
+Mycenaean Greek,Hellenic,2,Ancient
+Proto-Hellenic,Hellenic,1,Proto
+Polish,Slavic,5,Modern
+Russian,Slavic,5,Modern
+Ukrainian,Slavic,5,Modern
+Belarusian,Slavic,5,Modern
+Czech,Slavic,5,Modern
+Slovak,Slavic,5,Modern
+Serbo-Croatian,Slavic,5,Modern
+Bulgarian,Slavic,5,Modern
+Macedonian,Slavic,5,Modern
+Slovene,Slavic,5,Modern
+Old Church Slavonic,Slavic,2,Ancient
+Proto-Slavic,Slavic,1,Proto
+Proto-Balto-Slavic,Balto-Slavic,1,Proto
+Lithuanian,Baltic,5,Modern
+Latvian,Baltic,5,Modern
+Old Prussian,Baltic,3,Old
+Proto-Baltic,Baltic,1,Proto
+Sanskrit,Indo-Iranian,2,Ancient
+Hindi,Indo-Iranian,5,Modern
+Urdu,Indo-Iranian,5,Modern
+Persian,Indo-Iranian,5,Modern
+Old Persian,Indo-Iranian,2,Ancient
+Middle Persian,Indo-Iranian,4,Middle
+Pashto,Indo-Iranian,5,Modern
+Bengali,Indo-Iranian,5,Modern
+Punjabi,Indo-Iranian,5,Modern
+Nepali,Indo-Iranian,5,Modern
+Marathi,Indo-Iranian,5,Modern
+Gujarati,Indo-Iranian,5,Modern
+Pali,Indo-Iranian,2,Ancient
+Prakrit,Indo-Iranian,2,Ancient
+Avestan,Indo-Iranian,2,Ancient
+Proto-Indo-Iranian,Indo-Iranian,1,Proto
+Proto-Iranian,Indo-Iranian,1,Proto
+Irish,Celtic,5,Modern
+Old Irish,Celtic,3,Old
+Middle Irish,Celtic,4,Middle
+Welsh,Celtic,5,Modern
+Middle Welsh,Celtic,4,Middle
+Scottish Gaelic,Celtic,5,Modern
+Breton,Celtic,5,Modern
+Cornish,Celtic,5,Modern
+Manx,Celtic,5,Modern
+Gaulish,Celtic,2,Ancient
+Proto-Celtic,Celtic,1,Proto
+Albanian,Albanian,5,Modern
+Proto-Albanian,Albanian,1,Proto
+Old Armenian,Armenian,2,Ancient
+Armenian,Armenian,5,Modern
+Proto-Armenian,Armenian,1,Proto
+Tocharian A,Tocharian,2,Ancient
+Tocharian B,Tocharian,2,Ancient
+Finnish,Uralic,5,Modern
+Estonian,Uralic,5,Modern
+Hungarian,Uralic,5,Modern
+Karelian,Uralic,5,Modern
+Votic,Uralic,5,Modern
+Veps,Uralic,5,Modern
+Northern Sami,Uralic,5,Modern
+Proto-Finnic,Uralic,1,Proto
+Proto-Uralic,Uralic,0,Proto (root)
+Proto-Samic,Uralic,1,Proto
+Turkish,Turkic,5,Modern
+Azerbaijani,Turkic,5,Modern
+Kazakh,Turkic,5,Modern
+Uzbek,Turkic,5,Modern
+Turkmen,Turkic,5,Modern
+Kyrgyz,Turkic,5,Modern
+Tatar,Turkic,5,Modern
+Bashkir,Turkic,5,Modern
+Uyghur,Turkic,5,Modern
+Chuvash,Turkic,5,Modern
+Ottoman Turkish,Turkic,4,Middle
+Old Turkic,Turkic,2,Ancient
+Proto-Turkic,Turkic,0,Proto (root)
+Arabic,Afroasiatic,5,Modern
+Hebrew,Afroasiatic,5,Modern
+Aramaic,Afroasiatic,2,Ancient
+Amharic,Afroasiatic,5,Modern
+Maltese,Afroasiatic,5,Modern
+Akkadian,Afroasiatic,2,Ancient
+Egyptian,Afroasiatic,2,Ancient
+Proto-Semitic,Afroasiatic,0,Proto (root)
+Japanese,Japonic,5,Modern
+Old Japanese,Japonic,3,Old
+Okinawan,Japonic,5,Modern
+Proto-Japonic,Japonic,0,Proto (root)
+Korean,Koreanic,5,Modern
+Middle Korean,Koreanic,4,Middle
+Old Korean,Koreanic,3,Old
+Proto-Koreanic,Koreanic,0,Proto (root)
+Mandarin,Sino-Tibetan,5,Modern
+Chinese,Sino-Tibetan,5,Modern
+Middle Chinese,Sino-Tibetan,4,Middle
+Old Chinese,Sino-Tibetan,2,Ancient
+Cantonese,Sino-Tibetan,5,Modern
+Tibetan,Sino-Tibetan,5,Modern
+Burmese,Sino-Tibetan,5,Modern
+Proto-Sino-Tibetan,Sino-Tibetan,0,Proto (root)
+Thai,Tai-Kadai,5,Modern
+Lao,Tai-Kadai,5,Modern
+Zhuang,Tai-Kadai,5,Modern
+Shan,Tai-Kadai,5,Modern
+Proto-Tai,Tai-Kadai,1,Proto
+Vietnamese,Austroasiatic,5,Modern
+Khmer,Austroasiatic,5,Modern
+Mon,Austroasiatic,5,Modern
+Proto-Mon-Khmer,Austroasiatic,0,Proto (root)
+Indonesian,Austronesian,5,Modern
+Malay,Austronesian,5,Modern
+Tagalog,Austronesian,5,Modern
+Cebuano,Austronesian,5,Modern
+Javanese,Austronesian,5,Modern
+Hawaiian,Austronesian,5,Modern
+Maori,Austronesian,5,Modern
+Malagasy,Austronesian,5,Modern
+Proto-Austronesian,Austronesian,0,Proto (root)
+Proto-Malayo-Polynesian,Austronesian,1,Proto
+Mongolian,Mongolic,5,Modern
+Middle Mongol,Mongolic,4,Middle
+Proto-Mongolic,Mongolic,0,Proto (root)
+Georgian,Kartvelian,5,Modern
+Old Georgian,Kartvelian,3,Old
+Basque,Isolate,5,Modern
+Swahili,Niger-Congo,5,Modern
+Yoruba,Niger-Congo,5,Modern
+Zulu,Niger-Congo,5,Modern
+Proto-Bantu,Niger-Congo,1,Proto
+Nahuatl,Uto-Aztecan,5,Modern
+Quechua,Quechuan,5,Modern
+Esperanto,Constructed,5,Modern
+Ido,Constructed,5,Modern
+Interlingua,Constructed,5,Modern
+Volapük,Constructed,5,Modern
+Translingual,Translingual,5,Modern

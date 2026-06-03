@@ -54,7 +54,11 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--full", default="build/etymology.sqlite")
     p.add_argument("--out", default="data/etymology-web.sqlite")
-    p.add_argument("--min-degree", type=int, default=6)
+    p.add_argument("--min-degree", type=int, default=3)
+    p.add_argument("--gzip", action="store_true",
+                   help="also emit <out>.gz (the file the static site ships)")
+    p.add_argument("--keep-uncompressed", action="store_true",
+                   help="with --gzip, keep the uncompressed .sqlite too")
     p.add_argument("--langs-file", help="optional newline-delimited language list")
     args = p.parse_args()
 
@@ -73,7 +77,8 @@ def main():
     cur.executescript("""
         CREATE TEMP TABLE keep_lang (lang TEXT PRIMARY KEY);
         CREATE TABLE web.terms (
-            term_id TEXT PRIMARY KEY, term TEXT NOT NULL, lang TEXT NOT NULL, family TEXT);
+            term_id TEXT PRIMARY KEY, term TEXT NOT NULL, lang TEXT NOT NULL,
+            family TEXT, era_rank INTEGER);
         CREATE TABLE web.edges (
             term_id TEXT NOT NULL, term TEXT NOT NULL, lang TEXT NOT NULL,
             reltype TEXT NOT NULL, reltype_class TEXT NOT NULL,
@@ -122,7 +127,27 @@ def main():
     cur.execute("VACUUM web")
     con.commit()
     con.close()
-    log(f"web db: {args.out}  ({nt:,} terms, {ne:,} edges, {human(os.path.getsize(args.out))})")
+    raw = os.path.getsize(args.out)
+    log(f"web db: {args.out}  ({nt:,} terms, {ne:,} edges, {human(raw)})")
+
+    if args.gzip:
+        import gzip as _gz
+        gz_path = args.out + ".gz"
+        log("gzipping ...")
+        with open(args.out, "rb") as fin, _gz.open(gz_path, "wb", compresslevel=9) as fout:
+            while True:
+                chunk = fin.read(1 << 20)
+                if not chunk:
+                    break
+                fout.write(chunk)
+        gz = os.path.getsize(gz_path)
+        log(f"gzipped: {gz_path}  ({human(gz)}, {100 * gz / raw:.0f}% of raw)")
+        if gz > 100 * 1024 * 1024:
+            log("  WARNING: gzipped web db exceeds GitHub Pages' 100MB/file limit. "
+                "Raise --min-degree, trim languages, or shard.")
+        if not args.keep_uncompressed:
+            os.remove(args.out)
+            log(f"removed uncompressed {args.out} (commit the .gz; it is a build artifact)")
 
 
 if __name__ == "__main__":

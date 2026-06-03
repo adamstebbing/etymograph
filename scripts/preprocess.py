@@ -49,6 +49,45 @@ for r in ["cognate_of", "etymologically_related_to", "is_onomatopoeic", "named_a
 
 GROUP_RELTYPES = {"group_affix_root", "group_related_root", "group_derived_root"}
 
+# --- language era model (DESIGN.md section 11) --------------------------------
+# era_rank: 0 family-root proto (top) ... 5 modern (bottom).
+ERA_LABELS = {0: "Proto (root)", 1: "Proto", 2: "Ancient", 3: "Old", 4: "Middle", 5: "Modern"}
+TOP_PROTOS = {
+    "Proto-Indo-European", "Proto-Uralic", "Proto-Turkic", "Proto-Japonic",
+    "Proto-Koreanic", "Proto-Mongolic", "Proto-Sino-Tibetan", "Proto-Austronesian",
+    "Proto-Mon-Khmer", "Proto-Semitic",
+}
+
+
+def era_from_name(lang):
+    """Fallback era_rank for languages not in the curated map, by name prefix."""
+    if lang in TOP_PROTOS:
+        return 0
+    if lang.startswith("Proto-"):
+        return 1
+    if lang.startswith("Ancient "):
+        return 2
+    if lang.startswith("Old "):
+        return 3
+    if lang.startswith("Middle "):
+        return 4
+    return 5
+
+
+def load_lang_meta(path):
+    """lang -> (family, era_rank) from the curated CSV; era falls back by name."""
+    meta = {}
+    with open(path, "rt", encoding="utf-8", newline="") as f:
+        for rec in csv.DictReader(f):
+            lang = rec["lang"]
+            fam = (rec.get("family") or "Unknown").strip() or "Unknown"
+            try:
+                era = int(rec["era_rank"])
+            except (KeyError, TypeError, ValueError):
+                era = era_from_name(lang)
+            meta[lang] = (fam, era)
+    return meta
+
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -172,14 +211,15 @@ def build_full_db(args):
     log(f"read {total:,} rows -> kept {kept:,} edges "
         f"(dropped {skipped_group:,} group, {skipped_null:,} null/invalid)")
 
-    # --- terms table: union of both endpoints, with family ------------------
+    # --- terms table: union of both endpoints, with family + era ------------
     log("building terms table ...")
     cur.executescript("""
         CREATE TABLE terms (
-            term_id TEXT PRIMARY KEY,
-            term    TEXT NOT NULL,
-            lang    TEXT NOT NULL,
-            family  TEXT
+            term_id  TEXT PRIMARY KEY,
+            term     TEXT NOT NULL,
+            lang     TEXT NOT NULL,
+            family   TEXT,
+            era_rank INTEGER
         );
         INSERT OR IGNORE INTO terms (term_id, term, lang)
             SELECT term_id, term, lang FROM edges;
@@ -190,19 +230,18 @@ def build_full_db(args):
     """)
     con.commit()
 
-    # families
-    fam = {}
-    with open(args.families, "rt", encoding="utf-8", newline="") as f:
-        for rec in csv.DictReader(f):
-            fam[rec["lang"]] = rec["family"]
-    cur.execute("CREATE TEMP TABLE lang_family (lang TEXT PRIMARY KEY, family TEXT)")
-    cur.executemany("INSERT OR REPLACE INTO lang_family VALUES (?,?)", list(fam.items()))
-    cur.execute("""UPDATE terms SET family = COALESCE(
-                       (SELECT family FROM lang_family WHERE lang_family.lang = terms.lang),
-                       'Unknown')""")
+    # families + eras: resolve every distinct lang (curated map, then fallback)
+    meta = load_lang_meta(args.families)
+    langs = [r[0] for r in cur.execute("SELECT DISTINCT lang FROM terms")]
+    rows = [(l, *meta.get(l, ("Unknown", era_from_name(l)))) for l in langs]
+    cur.execute("CREATE TEMP TABLE lang_meta (lang TEXT PRIMARY KEY, family TEXT, era_rank INTEGER)")
+    cur.executemany("INSERT OR REPLACE INTO lang_meta VALUES (?,?,?)", rows)
+    cur.execute("""UPDATE terms SET
+                       family   = (SELECT family   FROM lang_meta WHERE lang_meta.lang = terms.lang),
+                       era_rank = (SELECT era_rank FROM lang_meta WHERE lang_meta.lang = terms.lang)""")
     con.commit()
     nterms = cur.execute("SELECT COUNT(*) FROM terms").fetchone()[0]
-    log(f"terms: {nterms:,}")
+    log(f"terms: {nterms:,}  ({len(langs):,} languages)")
 
     # --- indexes + vacuum ---------------------------------------------------
     log("creating indexes ...")
@@ -220,15 +259,18 @@ def build_full_db(args):
     con.close()
     log(f"full db: {args.out_sqlite}  ({human(os.path.getsize(args.out_sqlite))})")
 
-    return influence, lang_edges, degree, fam
+    return influence, lang_edges, degree, meta
 
 
-def write_influence(args, influence, lang_edges, fam):
+def write_influence(args, influence, lang_edges, meta):
     top = sorted(lang_edges, key=lang_edges.get, reverse=True)[: args.max_langs]
     topset = set(top)
 
     def bucket(l):
         return l if l in topset else "Other"
+
+    def lang_meta(l):
+        return meta.get(l, ("Unknown", era_from_name(l)))
 
     agg = {}
     for (src, tgt, cls), w in influence.items():
@@ -237,8 +279,21 @@ def write_influence(args, influence, lang_edges, fam):
             continue
         agg[(s, t, cls)] = agg.get((s, t, cls), 0) + w
 
-    langs = [{"id": l, "name": l, "family": fam.get(l, "Unknown")} for l in top]
-    langs.append({"id": "Other", "name": "Other", "family": "Unknown"})
+    # family columns: order families by total edge volume among the top languages
+    fam_vol = {}
+    for l in top:
+        fam = lang_meta(l)[0]
+        fam_vol[fam] = fam_vol.get(fam, 0) + lang_edges.get(l, 0)
+    fam_order = sorted(fam_vol, key=fam_vol.get, reverse=True)
+    fam_col = {f: i for i, f in enumerate(fam_order)}
+
+    langs = []
+    for l in top:
+        fam, era = lang_meta(l)
+        langs.append({"id": l, "name": l, "family": fam, "era_rank": era,
+                      "column": fam_col.get(fam, len(fam_col))})
+    langs.append({"id": "Other", "name": "Other", "family": "Unknown",
+                  "era_rank": 5, "column": len(fam_col)})
     edges = [{"source": s, "target": t, "reltype_class": c, "weight": w}
              for (s, t, c), w in sorted(agg.items(), key=lambda kv: kv[1], reverse=True)]
     out = {"languages": langs, "edges": edges}
@@ -269,8 +324,8 @@ def main():
     args = p.parse_args()
 
     t0 = time.time()
-    influence, lang_edges, degree, fam = build_full_db(args)
-    top = write_influence(args, influence, lang_edges, fam)
+    influence, lang_edges, degree, meta = build_full_db(args)
+    top = write_influence(args, influence, lang_edges, meta)
     if args.out_sql:
         dump_sql(args)
     log(f"done in {time.time() - t0:.0f}s. influence top langs: {', '.join(top[:10])} ...")
