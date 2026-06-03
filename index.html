@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Etymograph — a 3D etymology explorer</title>
+  <meta name="description" content="A 3D force-directed explorer of language influence and word etymologies, built on the droher/etymology-db Wiktionary dataset." />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="graph"></div>
+
+  <header id="panel">
+    <div class="brand">
+      <h1>Etymograph</h1>
+      <span class="tag">3D etymology explorer</span>
+    </div>
+
+    <form id="search-form" autocomplete="off">
+      <input id="search-input" type="search" placeholder="Search a word — try water, mother, night" aria-label="Search a word" />
+      <button id="search-btn" type="submit">Search</button>
+      <button id="reset-btn" type="button" title="Back to the language-influence view">Reset</button>
+    </form>
+
+    <div class="controls">
+      <div class="seg" id="color-mode" role="group" aria-label="Color mode">
+        <button data-mode="relation" class="active" type="button">Relation type</button>
+        <button data-mode="family" type="button">Language family</button>
+      </div>
+    </div>
+
+    <div id="legend" class="legend"></div>
+    <div id="status" class="status"></div>
+  </header>
+
+  <footer id="credit">
+    Data: <a href="https://github.com/droher/etymology-db" target="_blank" rel="noopener">droher/etymology-db</a>,
+    derived from <a href="https://www.wiktionary.org/" target="_blank" rel="noopener">Wiktionary</a>,
+    licensed <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a>.
+  </footer>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+
+  <!-- Vendored runtime libraries (no CDN, no build step). Versions in README. -->
+  <script src="./lib/3d-force-graph.min.js"></script>
+  <script src="./lib/sqljs/sql-wasm.js"></script>
+  <script src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# The pipeline reads gzipped CSV with the Python standard library only — no deps
+# are required for the default path. Install pyarrow only if you feed it the
+# Parquet release instead of the gzipped CSV.
+pyarrow>=14.0 ; python_version >= "3.10"

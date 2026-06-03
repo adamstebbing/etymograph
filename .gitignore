@@ -1,0 +1,24 @@
+# Source dataset — large, downloaded manually, never committed (see README).
+etymology.csv.gz
+*.parquet
+
+# Build artifacts. The full DB (~1GB) and SQL dump are intermediates for the
+# Cloudflare/D1 path; only data/etymology-web.sqlite (the pruned static DB) and
+# data/influence.json are committed and served.
+build/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local Claude Code settings (machine-specific permissions)
+.claude/settings.local.json

@@ -1,0 +1,14 @@
+name = "etymograph-api"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Allowed CORS origins for the frontend (comma-separated). Update to your real
+# Pages URL after the first deploy, then `wrangler deploy` again. Avoid "*" in prod.
+[vars]
+ALLOWED_ORIGIN = "http://localhost:8000,http://localhost:8787"
+
+# Fill database_id from `wrangler d1 create etymograph` (DEPLOYMENT.md section 3).
+[[d1_databases]]
+binding = "DB"
+database_name = "etymograph"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"

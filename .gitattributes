@@ -1,0 +1,5 @@
+# Keep data + binary libs byte-exact (served as-is by Pages; never normalize).
+*.sqlite binary
+*.wasm binary
+data/influence.json -text
+lib/*.min.js -text
