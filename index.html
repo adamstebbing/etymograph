@@ -40,7 +40,8 @@
     licensed <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a>.
   </footer>
 
-  <button id="reorient-btn" class="fab" type="button" title="Re-orient view to the X-axis" aria-label="Re-orient view to the X-axis">⌖</button>
+  <button id="align-btn" class="fab" type="button" title="Straighten — align the X-axis horizontal" aria-label="Straighten the X-axis">↔</button>
+  <button id="reorient-btn" class="fab" type="button" title="Reset view (front, framed)" aria-label="Reset view">⌖</button>
   <button id="settings-toggle" class="fab" type="button" title="Layout settings" aria-label="Toggle layout settings">⚙</button>
   <aside id="settings-panel" class="settings" hidden>
     <h2>Layout settings</h2>
@@ -59,6 +60,20 @@
     <label class="set-row">
       <span>Max line thickness <output id="out-width"></output></span>
       <input type="range" id="set-width" min="1" max="20" step="0.5" />
+    </label>
+    <label class="set-row">
+      <span>Panning sensitivity <output id="out-pan"></output></span>
+      <input type="range" id="set-pan" min="0.05" max="2" step="0.05" />
+    </label>
+    <label class="set-row">
+      <span>Relation colors</span>
+      <select id="set-scheme" class="set-select">
+        <option value="default">Default</option>
+        <option value="neon">Neon</option>
+        <option value="colorblind">Colorblind-friendly</option>
+        <option value="grayscale">Grayscale</option>
+        <option value="pastel">Pastel</option>
+      </select>
     </label>
   </aside>
 

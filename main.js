@@ -35,6 +35,7 @@ const SETTINGS = {
   circleDistance: 120,  // center-to-center spacing of family circles, px
   levelGap: 80,         // vertical px between era levels
   maxLinkWidth: 6,      // thickest rendered link
+  panSpeed: 0.3,        // TrackballControls pan sensitivity (default 0.3)
 };
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5)); // ≈137.5° — even spiral packing
 let maxInfluenceWeight = 1;   // largest edge weight in the current influence graph
@@ -43,10 +44,18 @@ let maxInfluenceWeight = 1;   // largest edge weight in the current influence gr
 const ANCESTRY = new Set(["inherited", "derived", "root"]);
 
 // --------------------------------------------------------------- palette -----
-const RELATION_COLORS = {
-  inherited: "#4ade80", borrowed: "#f472b6", derived: "#fbbf24",
-  root: "#a78bfa", cognate: "#38bdf8", other: "#94a3b8",
+// Selectable relation-type color schemes. Each must define all six classes.
+// Colorblind-friendly uses the Okabe-Ito palette (safe across common types of
+// color vision deficiency); grayscale separates by lightness for print/mono.
+const RELATION_SCHEMES = {
+  default:    { inherited: "#4ade80", borrowed: "#f472b6", derived: "#fbbf24", root: "#a78bfa", cognate: "#38bdf8", other: "#94a3b8" },
+  neon:       { inherited: "#39ff14", borrowed: "#ff2079", derived: "#ffe600", root: "#b026ff", cognate: "#0ff0fc", other: "#9aa0a6" },
+  colorblind: { inherited: "#009e73", borrowed: "#cc79a7", derived: "#e69f00", root: "#f0e442", cognate: "#56b4e9", other: "#999999" },
+  grayscale:  { inherited: "#ffffff", borrowed: "#d0d0d0", derived: "#a6a6a6", root: "#7c7c7c", cognate: "#bcbcbc", other: "#6a6a6a" },
+  pastel:     { inherited: "#a7e8bd", borrowed: "#f7b7d2", derived: "#fde8a7", root: "#cdb4f6", cognate: "#a7d8f0", other: "#c9d1dc" },
 };
+// Active map (mutated in place so existing references stay valid).
+const RELATION_COLORS = { ...RELATION_SCHEMES.default };
 const RELATION_LABELS = {
   inherited: "Inherited", borrowed: "Borrowed", derived: "Derived",
   root: "Root", cognate: "Cognate / related",
@@ -288,6 +297,25 @@ function reorientToX() {
   const t = Math.tan(fovV / 2) || 0.5;
   const fit = Math.max(halfH / t, halfW / (t * aspect)) * 1.15 + halfD;
   Graph.cameraPosition({ x: c.x, y: c.y, z: c.z + (fit || 600) }, c, 700);
+}
+
+// Straighten the camera's roll so the world X-axis sits horizontal on screen,
+// without moving the camera or changing zoom. Free orbiting (TrackballControls)
+// lets the up vector roll; this snaps it back. up = normalize(viewDir × X) is
+// perpendicular to X (so X has no vertical component → horizontal) and to the
+// view direction (so it stays a valid up).
+function alignToX() {
+  const cam = Graph.camera();
+  const ctrls = Graph.controls();
+  const t = (ctrls && ctrls.target) || { x: 0, y: 0, z: 0 };
+  const fy = t.y - cam.position.y, fz = t.z - cam.position.z;
+  let uy = fz, uz = -fy;                       // viewDir × (1,0,0) = (0, fz, -fy)
+  const ul = Math.hypot(uy, uz);
+  if (ul < 1e-6) return;                        // looking straight along X: nothing to align
+  uy /= ul; uz /= ul;
+  if (uy < 0) { uy = -uy; uz = -uz; }          // keep "up" pointing up
+  cam.up.set(0, uy, uz);
+  if (ctrls && ctrls.update) ctrls.update();
 }
 
 function nodeColor(n) {
@@ -598,11 +626,27 @@ function relayout() {
   Graph.cooldownTicks(60).graphData({ nodes, links });
 }
 
+// Push the current pan sensitivity onto the controls (they read it per-drag).
+function applyPanSpeed() {
+  const c = Graph.controls();
+  if (c) c.panSpeed = SETTINGS.panSpeed;
+}
+
+// Swap the active relation-type palette and refresh colors + legend.
+function setRelationScheme(name) {
+  Object.assign(RELATION_COLORS, RELATION_SCHEMES[name] || RELATION_SCHEMES.default);
+  const { nodes, links } = Graph.graphData();
+  if (colorMode === "relation" && !isInfluenceView) decorateRelColors(nodes, links);
+  Graph.nodeColor(nodeColor).linkColor(linkColor);
+  renderLegend();
+}
+
 const SETTINGS_INPUTS = [
-  { id: "set-radius", key: "circleRadius", out: "out-radius" },
-  { id: "set-dist", key: "circleDistance", out: "out-dist" },
-  { id: "set-level", key: "levelGap", out: "out-level" },
-  { id: "set-width", key: "maxLinkWidth", out: "out-width" },
+  { id: "set-radius", key: "circleRadius", out: "out-radius", apply: relayout },
+  { id: "set-dist", key: "circleDistance", out: "out-dist", apply: relayout },
+  { id: "set-level", key: "levelGap", out: "out-level", apply: relayout },
+  { id: "set-width", key: "maxLinkWidth", out: "out-width", apply: () => Graph.linkWidth(linkWidth) },
+  { id: "set-pan", key: "panSpeed", out: "out-pan", apply: applyPanSpeed },
 ];
 for (const s of SETTINGS_INPUTS) {
   const input = el(s.id), out = el(s.out);
@@ -612,10 +656,13 @@ for (const s of SETTINGS_INPUTS) {
   input.addEventListener("input", () => {
     SETTINGS[s.key] = Number(input.value);
     if (out) out.textContent = input.value;
-    if (s.key === "maxLinkWidth") Graph.linkWidth(linkWidth); // width-only: no relayout
-    else relayout();
+    s.apply();
   });
 }
+applyPanSpeed();
+
+const schemeSelect = el("set-scheme");
+if (schemeSelect) schemeSelect.addEventListener("change", () => setRelationScheme(schemeSelect.value));
 
 el("settings-toggle").addEventListener("click", () => {
   const p = el("settings-panel");
@@ -624,6 +671,7 @@ el("settings-toggle").addEventListener("click", () => {
 });
 
 el("reorient-btn").addEventListener("click", reorientToX);
+el("align-btn").addEventListener("click", alignToX);
 
 // ----------------------------------------------------------------- boot ------
 function loadInfluence() {

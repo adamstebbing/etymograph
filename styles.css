@@ -125,6 +125,7 @@ button:hover { background: rgba(60, 72, 92, 0.8); }
 }
 #settings-toggle { right: 16px; }
 #reorient-btn { right: 64px; }
+#align-btn { right: 112px; }
 #settings-toggle.active { background: rgba(110, 168, 254, 0.18); border-color: var(--accent); }
 
 .settings {
@@ -151,6 +152,18 @@ button:hover { background: rgba(60, 72, 92, 0.8); }
   accent-color: var(--accent);
   cursor: pointer;
 }
+.set-select {
+  width: 100%;
+  padding: 7px 9px;
+  background: rgba(8, 10, 14, 0.7);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-family: var(--sans);
+  cursor: pointer;
+}
+.set-select:focus { outline: none; border-color: var(--accent); }
 
 .tooltip {
   position: fixed;
