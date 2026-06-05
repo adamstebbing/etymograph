@@ -40,6 +40,28 @@
     licensed <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a>.
   </footer>
 
+  <button id="reorient-btn" class="fab" type="button" title="Re-orient view to the X-axis" aria-label="Re-orient view to the X-axis">⌖</button>
+  <button id="settings-toggle" class="fab" type="button" title="Layout settings" aria-label="Toggle layout settings">⚙</button>
+  <aside id="settings-panel" class="settings" hidden>
+    <h2>Layout settings</h2>
+    <label class="set-row">
+      <span>Circle radius <output id="out-radius"></output></span>
+      <input type="range" id="set-radius" min="10" max="200" step="2" />
+    </label>
+    <label class="set-row">
+      <span>Distance between circles <output id="out-dist"></output></span>
+      <input type="range" id="set-dist" min="20" max="400" step="5" />
+    </label>
+    <label class="set-row">
+      <span>Distance between levels <output id="out-level"></output></span>
+      <input type="range" id="set-level" min="20" max="200" step="5" />
+    </label>
+    <label class="set-row">
+      <span>Max line thickness <output id="out-width"></output></span>
+      <input type="range" id="set-width" min="1" max="20" step="0.5" />
+    </label>
+  </aside>
+
   <div id="tooltip" class="tooltip" hidden></div>
 
   <!-- Vendored runtime libraries (no CDN, no build step). Versions in README. -->

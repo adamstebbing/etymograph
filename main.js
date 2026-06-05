@@ -20,10 +20,24 @@ const SQL_WASM_DIR = "./lib/sqljs/";
 
 // layout constants
 const MAX_ERA = 5;            // modern
-const LEVEL_GAP = 80;        // vertical px between era levels
-const COLUMN_GAP = 240;      // horizontal px between family columns
+const COLUMN_GAP = 240;      // horizontal px between family columns (word view legacy)
 const TIEBREAK_FRAC = 0.6;   // max intra-era nudge, as a fraction of LEVEL_GAP
 const MAX_WORD_NODES = 250;
+
+// Tunable layout settings (exposed via the settings panel). In the influence
+// view each language family is laid out as its own circle in the X/Z plane;
+// the families are packed in a phyllotaxis spiral so the largest (most
+// influential) family sits dead-center and smaller ones ring outward. Era
+// stays on the Y axis. Defaults keep CIRCLE_DISTANCE === 2 × CIRCLE_RADIUS so
+// neighbouring family circles sit just tangent.
+const SETTINGS = {
+  circleRadius: 60,     // radius of each family's circle (X/Z), px
+  circleDistance: 120,  // center-to-center spacing of family circles, px
+  levelGap: 80,         // vertical px between era levels
+  maxLinkWidth: 6,      // thickest rendered link
+};
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5)); // ≈137.5° — even spiral packing
+let maxInfluenceWeight = 1;   // largest edge weight in the current influence graph
 
 // reltype classes that point from a term to an older ancestor
 const ANCESTRY = new Set(["inherited", "derived", "root"]);
@@ -58,7 +72,6 @@ const langFilterEl = el("lang-filter");
 // state
 let colorMode = "relation";       // "relation" | "family"
 let isInfluenceView = true;
-let columnCount = 1;              // family columns in the influence view
 let currentTerm = "";            // last searched term (for the language filter)
 const coreIds = new Set();        // node ids from the current search/influence core
 const expanded = new Set();       // node ids currently expanded
@@ -223,6 +236,7 @@ function mergeGraphs(a, b, cap = MAX_WORD_NODES) {
 
 // ---------------------------------------------------------------- graph ------
 const Graph = ForceGraph3D()(el("graph"))
+  .showNavInfo(false)           // built-in hint would be wrong after the button swap
   .backgroundColor("#0a0c10")
   .nodeRelSize(4)
   .nodeOpacity(0.95)
@@ -237,6 +251,45 @@ const Graph = ForceGraph3D()(el("graph"))
 Graph.width(window.innerWidth).height(window.innerHeight);
 window.addEventListener("resize", () => Graph.width(window.innerWidth).height(window.innerHeight));
 
+// Swap drag buttons: left-drag pans, right-drag rotates (TrackballControls
+// defaults to the reverse). Re-applied on a tick in case controls init late.
+function swapDragButtons() {
+  const c = Graph.controls();
+  if (!c || !c.mouseButtons) return false;
+  const { LEFT, RIGHT } = c.mouseButtons;
+  c.mouseButtons.LEFT = RIGHT;
+  c.mouseButtons.RIGHT = LEFT;
+  return true;
+}
+if (!swapDragButtons()) setTimeout(swapDragButtons, 0);
+
+// Re-orient the camera to a clean front view: world X horizontal, Y vertical,
+// looking straight down the Z axis at the graph's center, pulled back far
+// enough to frame the whole graph.
+function reorientToX() {
+  const ns = Graph.graphData().nodes;
+  const c = { x: 0, y: 0, z: 0 };
+  let halfW = 0, halfH = 0, halfD = 0;
+  if (ns.length) {
+    let xn = Infinity, xx = -Infinity, yn = Infinity, yx = -Infinity, zn = Infinity, zx = -Infinity;
+    for (const n of ns) {
+      const x = n.x || 0, y = n.y || 0, z = n.z || 0;
+      if (x < xn) xn = x; if (x > xx) xx = x;
+      if (y < yn) yn = y; if (y > yx) yx = y;
+      if (z < zn) zn = z; if (z > zx) zx = z;
+    }
+    c.x = (xn + xx) / 2; c.y = (yn + yx) / 2; c.z = (zn + zx) / 2;
+    halfW = (xx - xn) / 2; halfH = (yx - yn) / 2; halfD = (zx - zn) / 2;
+  }
+  const cam = Graph.camera();
+  cam.up.set(0, 1, 0);
+  const fovV = ((cam.fov || 50) * Math.PI) / 180;
+  const aspect = (Graph.width() || window.innerWidth) / (Graph.height() || window.innerHeight);
+  const t = Math.tan(fovV / 2) || 0.5;
+  const fit = Math.max(halfH / t, halfW / (t * aspect)) * 1.15 + halfD;
+  Graph.cameraPosition({ x: c.x, y: c.y, z: c.z + (fit || 600) }, c, 700);
+}
+
 function nodeColor(n) {
   if (colorMode === "family") return familyColor(n.family);
   if (isInfluenceView) return "#9fb3cc";
@@ -247,8 +300,12 @@ function linkColor(l) {
   return RELATION_COLORS[l.reltype_class] || RELATION_COLORS.other;
 }
 function linkWidth(l) {
-  if (l.weight) return Math.max(0.5, Math.log10(l.weight + 1) * 1.6); // influence: thickness ∝ weight
-  return ANCESTRY.has(l.reltype_class) ? 1.4 : 0.7;                    // word: ancestry a touch bolder
+  if (l.weight) { // influence: thickness ∝ log(weight), scaled so the heaviest edge hits maxLinkWidth
+    const t = Math.log10(l.weight + 1) / Math.log10(maxInfluenceWeight + 1);
+    return Math.max(0.5, t * SETTINGS.maxLinkWidth);
+  }
+  const w = ANCESTRY.has(l.reltype_class) ? 1.4 : 0.7;                 // word: ancestry a touch bolder
+  return Math.min(w, SETTINGS.maxLinkWidth);
 }
 function nodeLabel(n) {
   const era = ERA_LABEL[n.era_rank] || "";
@@ -275,11 +332,44 @@ function decorateRelColors(nodes, links) {
 }
 
 // ------------------------------------------------------ layout (era-lock) ----
+// Assign each influence node a family index (0 = largest family) and a slot
+// within that family, so circular positions can be recomputed cheaply when the
+// settings sliders move. Families are ranked by total incoming weight.
+function assignFamilyLayout(nodes) {
+  const byFamily = new Map();
+  for (const n of nodes) (byFamily.get(n.family) || byFamily.set(n.family, []).get(n.family)).push(n);
+  const fams = [...byFamily.keys()].sort((a, b) => {
+    const w = (f) => byFamily.get(f).reduce((s, n) => s + (n.__weight || 0), 0);
+    return w(b) - w(a);
+  });
+  fams.forEach((f, fi) => {
+    const arr = byFamily.get(f);
+    arr.forEach((n, j) => { n.__famI = fi; n.__slot = j; n.__slotN = arr.length; });
+  });
+}
+
+// Center of family circle `fi` in the X/Z plane: a phyllotaxis spiral so fi=0
+// lands at the origin and the rest pack outward with even spacing.
+function familyCenter(fi) {
+  const r = SETTINGS.circleDistance * Math.sqrt(fi);
+  const a = fi * GOLDEN_ANGLE;
+  return { x: r * Math.cos(a), z: r * Math.sin(a) };
+}
+
 function applyLayout(nodes, links) {
   for (const n of nodes) {
-    n.fy = (MAX_ERA - (n.era_rank ?? 5)) * LEVEL_GAP;
-    if (isInfluenceView) n.fx = ((n.column || 0) - (columnCount - 1) / 2) * COLUMN_GAP;
-    else delete n.fx; // free X/Z in the word view
+    n.fy = (MAX_ERA - (n.era_rank ?? 5)) * SETTINGS.levelGap;
+    if (isInfluenceView) {
+      const c = familyCenter(n.__famI || 0);
+      if ((n.__slotN || 1) <= 1) { n.fx = c.x; n.fz = c.z; }
+      else {
+        const a = (n.__slot / n.__slotN) * Math.PI * 2;
+        n.fx = c.x + SETTINGS.circleRadius * Math.cos(a);
+        n.fz = c.z + SETTINGS.circleRadius * Math.sin(a);
+      }
+      n.x = n.fx; n.z = n.fz;            // snap so changes read instantly
+    } else { delete n.fx; delete n.fz; } // free X/Z in the word view
+    n.y = n.fy;
   }
   if (!isInfluenceView) applyTiebreaker(nodes, links);
 }
@@ -308,7 +398,7 @@ function applyTiebreaker(nodes, links) {
     const span = ds.length - 1;
     for (const n of arr) {
       let d = depth.get(n.id); if (d == null || d === Infinity) d = 0;
-      n.fy += (rankOf.get(d) / span) * (LEVEL_GAP * TIEBREAK_FRAC);
+      n.fy += (rankOf.get(d) / span) * (SETTINGS.levelGap * TIEBREAK_FRAC);
     }
   }
 }
@@ -326,18 +416,21 @@ function renderInfluence(data) {
   langFilterWrap(false);
   const incoming = new Map();
   for (const e of data.edges) incoming.set(e.target, (incoming.get(e.target) || 0) + e.weight);
-  columnCount = Math.max(1, ...data.languages.map((l) => (l.column || 0) + 1));
   const nodes = data.languages.map((l) => ({
-    id: l.id, term: l.name, lang: l.id, family: l.family, era_rank: l.era_rank ?? 5, column: l.column || 0,
+    id: l.id, term: l.name, lang: l.id, family: l.family, era_rank: l.era_rank ?? 5,
+    __weight: incoming.get(l.id) || 0,
     __val: Math.max(1, Math.log10((incoming.get(l.id) || 0) + 10) * 3),
   }));
   const links = data.edges.map((e) => ({
     source: e.source, target: e.target, reltype: e.reltype_class, reltype_class: e.reltype_class, weight: e.weight,
   }));
+  maxInfluenceWeight = Math.max(1, ...links.map((l) => l.weight || 0));
+  assignFamilyLayout(nodes);
+  const familyCount = new Set(nodes.map((n) => n.family)).size;
   nodes.forEach((n) => coreIds.add(n.id));
   commit(nodes, links);
-  setStatus(`Influence graph — ${nodes.length} languages in ${columnCount} family columns, ` +
-            `stacked by era (proto/old at top, modern at bottom). Search a word to explore it.`);
+  setStatus(`Influence graph — ${nodes.length} languages in ${familyCount} family circles, ` +
+            `largest family centered, stacked by era (proto/old on top). Search a word to explore it.`);
   renderLegend();
   frameGraph();
 }
@@ -495,6 +588,42 @@ el("search-form").addEventListener("submit", (e) => {
 if (langFilterEl) langFilterEl.addEventListener("change", () => runSearch(currentTerm, langFilterEl.value));
 el("reset-btn").addEventListener("click", loadInfluence);
 el("search-input").addEventListener("focus", () => el("panel").classList.remove("collapsed"));
+
+// ----------------------------------------------------------- settings --------
+// Re-apply the current layout settings to whatever graph is on screen.
+function relayout() {
+  const { nodes, links } = Graph.graphData();
+  if (isInfluenceView) assignFamilyLayout(nodes);
+  applyLayout(nodes, links);
+  Graph.cooldownTicks(60).graphData({ nodes, links });
+}
+
+const SETTINGS_INPUTS = [
+  { id: "set-radius", key: "circleRadius", out: "out-radius" },
+  { id: "set-dist", key: "circleDistance", out: "out-dist" },
+  { id: "set-level", key: "levelGap", out: "out-level" },
+  { id: "set-width", key: "maxLinkWidth", out: "out-width" },
+];
+for (const s of SETTINGS_INPUTS) {
+  const input = el(s.id), out = el(s.out);
+  if (!input) continue;
+  input.value = SETTINGS[s.key];
+  if (out) out.textContent = SETTINGS[s.key];
+  input.addEventListener("input", () => {
+    SETTINGS[s.key] = Number(input.value);
+    if (out) out.textContent = input.value;
+    if (s.key === "maxLinkWidth") Graph.linkWidth(linkWidth); // width-only: no relayout
+    else relayout();
+  });
+}
+
+el("settings-toggle").addEventListener("click", () => {
+  const p = el("settings-panel");
+  p.hidden = !p.hidden;
+  el("settings-toggle").classList.toggle("active", !p.hidden);
+});
+
+el("reorient-btn").addEventListener("click", reorientToX);
 
 // ----------------------------------------------------------------- boot ------
 function loadInfluence() {
