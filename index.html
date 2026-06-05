@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Etymograph — a 3D etymology explorer</title>
   <meta name="description" content="A 3D force-directed explorer of language influence and word etymologies, built on the droher/etymology-db Wiktionary dataset." />
+  <script>
+    // The influence gradient lines use the vendored standalone three.js, which
+    // coexists with the copy bundled inside 3d-force-graph. That triggers a
+    // harmless "Multiple instances of Three.js" console warning — filter only
+    // that exact message so the console stays clean.
+    (function () {
+      const warn = console.warn;
+      console.warn = function (msg) {
+        if (typeof msg === "string" && msg.indexOf("Multiple instances of Three.js") >= 0) return;
+        return warn.apply(console, arguments);
+      };
+    })();
+  </script>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -58,12 +71,16 @@
       <input type="range" id="set-level" min="20" max="200" step="5" />
     </label>
     <label class="set-row">
+      <span>Sphere size <output id="out-sphere"></output></span>
+      <input type="range" id="set-sphere" min="1" max="14" step="0.5" />
+    </label>
+    <label class="set-row">
       <span>Max line thickness <output id="out-width"></output></span>
       <input type="range" id="set-width" min="1" max="20" step="0.5" />
     </label>
     <label class="set-row">
       <span>Panning sensitivity <output id="out-pan"></output></span>
-      <input type="range" id="set-pan" min="0.05" max="2" step="0.05" />
+      <input type="range" id="set-pan" min="0.02" max="1" step="0.02" />
     </label>
     <label class="set-row">
       <span>Relation colors</span>
@@ -80,6 +97,8 @@
   <div id="tooltip" class="tooltip" hidden></div>
 
   <!-- Vendored runtime libraries (no CDN, no build step). Versions in README. -->
+  <!-- three first so window.THREE is available for the influence gradient lines -->
+  <script src="./lib/three.min.js"></script>
   <script src="./lib/3d-force-graph.min.js"></script>
   <script src="./lib/sqljs/sql-wasm.js"></script>
   <script src="./lib/fflate.min.js"></script>

@@ -34,8 +34,9 @@ const SETTINGS = {
   circleRadius: 60,     // radius of each family's circle (X/Z), px
   circleDistance: 120,  // center-to-center spacing of family circles, px
   levelGap: 80,         // vertical px between era levels
-  maxLinkWidth: 6,      // thickest rendered link
-  panSpeed: 0.3,        // TrackballControls pan sensitivity (default 0.3)
+  maxLinkWidth: 6,      // thickest rendered link (word view)
+  panSpeed: 0.1,        // TrackballControls pan sensitivity
+  sphereSize: 4,        // node sphere size (nodeRelSize)
 };
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5)); // ≈137.5° — even spiral packing
 let maxInfluenceWeight = 1;   // largest edge weight in the current influence graph
@@ -247,7 +248,7 @@ function mergeGraphs(a, b, cap = MAX_WORD_NODES) {
 const Graph = ForceGraph3D()(el("graph"))
   .showNavInfo(false)           // built-in hint would be wrong after the button swap
   .backgroundColor("#0a0c10")
-  .nodeRelSize(4)
+  .nodeRelSize(SETTINGS.sphereSize)
   .nodeOpacity(0.95)
   .nodeVal((n) => n.__val || 1)
   .nodeColor(nodeColor)
@@ -256,6 +257,8 @@ const Graph = ForceGraph3D()(el("graph"))
   .linkWidth(linkWidth)
   .linkOpacity(0.5)
   .linkLabel(linkLabel)
+  .linkThreeObject(gradientLinkObject)        // influence view: one gradient line per pair
+  .linkPositionUpdate(gradientLinkPosition)
   .onNodeClick(onNodeClick);
 Graph.width(window.innerWidth).height(window.innerHeight);
 window.addEventListener("resize", () => Graph.width(window.innerWidth).height(window.innerHeight));
@@ -341,10 +344,109 @@ function nodeLabel(n) {
   return `<b>${esc(n.term)}</b> <span style="color:#6ea8fe;font-family:monospace">${esc(n.lang || "")}</span><br><span style="color:#8b97a8">${esc(era)}</span>`;
 }
 function linkLabel(l) {
+  if (l.__mix) { // merged influence pair: list its relation types by weight
+    const parts = Object.entries(l.__mix).sort((a, b) => b[1] - a[1])
+      .map(([c, w]) => `<span style="color:${RELATION_COLORS[c] || RELATION_COLORS.other}">${esc(c)}</span> ${w.toLocaleString()}`);
+    return `${esc(lid(l.source))} ↔ ${esc(lid(l.target))}<br>${parts.join(" · ")}`;
+  }
   if (l.weight) return `${esc(l.reltype_class)} · ${l.weight.toLocaleString()}`;
   return esc((l.reltype || "").replace(/_/g, " "));
 }
 const ERA_LABEL = { 0: "Proto (root)", 1: "Proto", 2: "Ancient", 3: "Old", 4: "Middle", 5: "Modern" };
+
+// ----------------------------------------------- influence gradient links ----
+// In the influence view each language pair is a single line whose color is a
+// gradient: in relation mode it blends the relation-type colors in proportion
+// to how many terms fall in each class, in family mode it runs from the source
+// family color to the target family color. Edge weight maps to opacity. These
+// use custom THREE.Line objects (global THREE, vendored); the word view keeps
+// the default links. Live objects are tracked so a palette change recolors them
+// in place without a rebuild.
+const REL_PRIORITY = ["root", "inherited", "borrowed", "derived", "cognate", "other"];
+const GRADIENT_SAMPLES = 24;
+const gradientLines = [];   // { line, link } for in-place recolor
+
+// Ordered color stops (t in [0,1]) for a merged link under the current mode.
+function linkColorStops(link) {
+  if (colorMode === "family") {
+    return [{ t: 0, hex: familyColor(link.__srcFam) }, { t: 1, hex: familyColor(link.__tgtFam) }];
+  }
+  const mix = link.__mix || {};
+  const total = Object.values(mix).reduce((a, b) => a + b, 0) || 1;
+  const present = REL_PRIORITY.filter((c) => (mix[c] || 0) > 0);
+  if (present.length === 0) return [{ t: 0, hex: RELATION_COLORS.other }, { t: 1, hex: RELATION_COLORS.other }];
+  const stops = [];
+  let cum = 0;
+  for (const c of present) { const f = mix[c] / total; stops.push({ t: cum + f / 2, hex: RELATION_COLORS[c] }); cum += f; }
+  stops.unshift({ t: 0, hex: stops[0].hex });
+  stops.push({ t: 1, hex: stops[stops.length - 1].hex });
+  return stops;
+}
+function colorAtStops(stops, t, out) {
+  for (let i = 1; i < stops.length; i++) {
+    if (t <= stops[i].t) {
+      const a = stops[i - 1], b = stops[i];
+      const span = (b.t - a.t) || 1;
+      out.set(a.hex).lerp(TMP_COLOR.set(b.hex), (t - a.t) / span);
+      return out;
+    }
+  }
+  return out.set(stops[stops.length - 1].hex);
+}
+const TMP_COLOR = typeof THREE !== "undefined" ? new THREE.Color() : null;
+
+function weightToOpacity(w) {
+  const t = Math.log10((w || 0) + 1) / Math.log10(maxInfluenceWeight + 1);
+  return 0.12 + Math.max(0, Math.min(1, t)) * 0.73;
+}
+
+function paintGradient(line, link) {
+  const stops = linkColorStops(link);
+  const col = line.geometry.attributes.color;
+  const c = new THREE.Color();
+  for (let i = 0; i <= GRADIENT_SAMPLES; i++) {
+    colorAtStops(stops, i / GRADIENT_SAMPLES, c);
+    col.setXYZ(i, c.r, c.g, c.b);
+  }
+  col.needsUpdate = true;
+}
+
+// Repaint all live gradient lines (palette or color-mode change).
+function recolorGradientLines() {
+  for (const g of gradientLines) paintGradient(g.line, g.link);
+}
+
+function gradientLinkObject(link) {
+  if (!(isInfluenceView && link.__mix) || typeof THREE === "undefined") return null;
+  const n = GRADIENT_SAMPLES + 1;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: weightToOpacity(link.weight) });
+  const line = new THREE.Line(geo, mat);
+  line.__grad = true;
+  paintGradient(line, link);
+  gradientLines.push({ line, link });
+  return line;
+}
+function gradientLinkPosition(line, coords, link) {
+  if (!line || !line.__grad) return;           // word view: let default positioning run
+  const { start, end } = coords;
+  if (line.__sx === start.x && line.__sy === start.y && line.__sz === start.z &&
+      line.__ex === end.x && line.__ey === end.y && line.__ez === end.z) return true; // unchanged
+  line.__sx = start.x; line.__sy = start.y; line.__sz = start.z;
+  line.__ex = end.x; line.__ey = end.y; line.__ez = end.z;
+  const pos = line.geometry.attributes.position.array;
+  for (let i = 0; i <= GRADIENT_SAMPLES; i++) {
+    const t = i / GRADIENT_SAMPLES;
+    pos[i * 3] = start.x + (end.x - start.x) * t;
+    pos[i * 3 + 1] = start.y + (end.y - start.y) * t;
+    pos[i * 3 + 2] = start.z + (end.z - start.z) * t;
+  }
+  line.geometry.attributes.position.needsUpdate = true;
+  line.geometry.computeBoundingSphere();
+  return true;
+}
 
 // color each term node in relation mode by the class of its strongest link
 function decorateRelColors(nodes, links) {
@@ -449,9 +551,24 @@ function renderInfluence(data) {
     __weight: incoming.get(l.id) || 0,
     __val: Math.max(1, Math.log10((incoming.get(l.id) || 0) + 10) * 3),
   }));
-  const links = data.edges.map((e) => ({
-    source: e.source, target: e.target, reltype: e.reltype_class, reltype_class: e.reltype_class, weight: e.weight,
-  }));
+  const famById = new Map(nodes.map((n) => [n.id, n.family]));
+  // Collapse every language pair to a single link; keep the per-relation-type
+  // weights (the mix) for the gradient, and the total weight for opacity.
+  const pairs = new Map();
+  for (const e of data.edges) {
+    if (e.source === e.target) continue;
+    const key = e.source < e.target ? `${e.source} ${e.target}` : `${e.target} ${e.source}`;
+    let p = pairs.get(key);
+    if (!p) { p = { source: e.source, target: e.target, weight: 0, __mix: {} }; pairs.set(key, p); }
+    p.weight += e.weight;
+    p.__mix[e.reltype_class] = (p.__mix[e.reltype_class] || 0) + e.weight;
+  }
+  const links = [...pairs.values()];
+  for (const l of links) {
+    l.reltype_class = Object.entries(l.__mix).sort((a, b) => b[1] - a[1])[0][0]; // dominant, for fallbacks
+    l.__srcFam = famById.get(l.source);
+    l.__tgtFam = famById.get(l.target);
+  }
   maxInfluenceWeight = Math.max(1, ...links.map((l) => l.weight || 0));
   assignFamilyLayout(nodes);
   const familyCount = new Set(nodes.map((n) => n.family)).size;
@@ -490,6 +607,7 @@ function sizeByDepth(nodes) {
 }
 function resetInteractionState() {
   coreIds.clear(); expanded.clear(); expansions.clear();
+  gradientLines.length = 0;   // drop refs to the previous view's gradient lines
 }
 function frameGraph() { setTimeout(() => Graph.zoomToFit(600, 90), 700); }
 
@@ -590,6 +708,7 @@ el("color-mode").addEventListener("click", (e) => {
   const { nodes, links } = Graph.graphData();
   if (colorMode === "relation" && !isInfluenceView) decorateRelColors(nodes, links);
   Graph.nodeColor(nodeColor).linkColor(linkColor);
+  if (isInfluenceView) recolorGradientLines();
   renderLegend();
 });
 
@@ -638,6 +757,7 @@ function setRelationScheme(name) {
   const { nodes, links } = Graph.graphData();
   if (colorMode === "relation" && !isInfluenceView) decorateRelColors(nodes, links);
   Graph.nodeColor(nodeColor).linkColor(linkColor);
+  if (isInfluenceView) recolorGradientLines();   // repaint the influence gradient lines in place
   renderLegend();
 }
 
@@ -645,6 +765,7 @@ const SETTINGS_INPUTS = [
   { id: "set-radius", key: "circleRadius", out: "out-radius", apply: relayout },
   { id: "set-dist", key: "circleDistance", out: "out-dist", apply: relayout },
   { id: "set-level", key: "levelGap", out: "out-level", apply: relayout },
+  { id: "set-sphere", key: "sphereSize", out: "out-sphere", apply: () => Graph.nodeRelSize(SETTINGS.sphereSize) },
   { id: "set-width", key: "maxLinkWidth", out: "out-width", apply: () => Graph.linkWidth(linkWidth) },
   { id: "set-pan", key: "panSpeed", out: "out-pan", apply: applyPanSpeed },
 ];
